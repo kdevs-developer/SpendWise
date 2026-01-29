@@ -18,7 +18,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -35,38 +34,59 @@ fun CategoryNestedPicker(
     var step by remember { mutableIntStateOf(1) }
     var tempMain by remember { mutableStateOf("") }
 
-    // Edit/Delete states (Optional: keep if you want to allow deleting existing custom ones,
-    // otherwise these can be removed too if you want a strictly read-only list)
-    var itemToEdit by remember { mutableStateOf<String?>(null) }
-    var itemToDelete by remember { mutableStateOf<String?>(null) }
-
-    BackHandler(enabled = true) { if (step == 2) step = 1 else onDismiss() }
+    // [FIX] We removed the standalone BackHandler.
+    // Instead, we handle the logic in the Dialog's onDismissRequest below.
 
     val categories = viewModel.getCategoriesForType(isExpense)
     val sortedMainCategories = categories.keys.toList().sorted()
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Dialog(
+        // [FIX] Intercept the "Close" signal here
+        onDismissRequest = {
+            if (step == 2) {
+                // If in Step 2, Go Back to Step 1
+                step = 1
+            } else {
+                // If in Step 1, Close the Dialog
+                onDismiss()
+            }
+        },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+
                 // --- HEADER ---
                 CenterAlignedTopAppBar(
                     title = {
                         Text(
-                            text = if (step == 1) "Categories" else tempMain,
+                            text = if (step == 1) "Select Category" else tempMain,
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = { if (step == 1) onDismiss() else step = 1 }) {
+                        IconButton(onClick = {
+                            // Manual Back Button Click
+                            if (step == 1) onDismiss() else step = 1
+                        }) {
                             Icon(if (step == 1) Icons.Default.Close else Icons.Default.ArrowBack, null)
                         }
-                    }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background
+                    )
                 )
 
                 Divider(color = MaterialTheme.colorScheme.outlineVariant.copy(0.2f))
 
-                // --- CONTENT (LIST VIEW) ---
+                // --- CONTENT ---
                 if (categories.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -95,19 +115,17 @@ fun CategoryNestedPicker(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             if (currentStep == 1) {
-                                // MAIN CATEGORIES LIST
+                                // MAIN CATEGORIES
                                 items(sortedMainCategories) { mainCat ->
                                     CategoryListItem(
                                         name = mainCat,
                                         iconVector = viewModel.getIconForCategory(mainCat),
                                         showChevron = true,
-                                        onClick = { tempMain = mainCat; step = 2 },
-                                        onEdit = { /* Disabled editing main cats */ },
-                                        onDelete = { /* Disabled deleting main cats */ }
+                                        onClick = { tempMain = mainCat; step = 2 }
                                     )
                                 }
                             } else {
-                                // SUB CATEGORIES LIST
+                                // SUB CATEGORIES
                                 val subCats = categories[tempMain] ?: emptyList()
 
                                 items(subCats) { subCat ->
@@ -115,13 +133,9 @@ fun CategoryNestedPicker(
                                         name = subCat,
                                         iconVector = viewModel.getIconForCategory(subCat),
                                         showChevron = false,
-                                        onClick = { onConfirmed(tempMain, subCat) },
-                                        onEdit = { /* Disabled editing sub cats */ },
-                                        onDelete = { /* Disabled deleting sub cats */ }
+                                        onClick = { onConfirmed(tempMain, subCat) }
                                     )
                                 }
-
-                                // REMOVED: "Add New" Button
                             }
                         }
                     }
@@ -137,15 +151,13 @@ fun CategoryListItem(
     name: String,
     iconVector: ImageVector,
     showChevron: Boolean,
-    onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onClick: () -> Unit
 ) {
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(2.dp),
+        elevation = CardDefaults.cardElevation(1.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -173,7 +185,7 @@ fun CategoryListItem(
                 modifier = Modifier.weight(1f)
             )
 
-            // Actions
+            // Chevron
             if (showChevron) {
                 Icon(Icons.Default.ChevronRight, null, tint = Color.Gray)
             }

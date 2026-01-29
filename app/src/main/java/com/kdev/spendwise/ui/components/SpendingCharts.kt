@@ -15,28 +15,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import com.kdev.spendwise.data.Expense
 
 @Composable
 fun AnalyticalPieChart(
-    expenses: List<Expense>,
+    data: Map<String, Double>, // Changed to accept pre-calculated Map
     modifier: Modifier = Modifier
 ) {
-    // 1. Filter only Expenses (Positive amounts, based on your logic where Expense > 0 is actually stored as negative in DB,
-    // but usually passed here as positive for charting. Adjust filter if needed based on your exact storage).
-    // Assuming the list passed here is ALREADY filtered for expenses.
-
-    // Group by Category and Sum
-    val categoryTotals = remember(expenses) {
-        expenses.groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { kotlin.math.abs(it.amount) } }
-            .toList()
-            .sortedByDescending { it.second } // Sort big to small looks better
+    // Sort big to small for better visualization
+    val categoryTotals = remember(data) {
+        data.toList().sortedByDescending { it.second }
     }
 
     val totalAmount = remember(categoryTotals) { categoryTotals.sumOf { it.second } }
 
-    // 2. Extensive Aesthetic Color Palette
+    // Aesthetic Color Palette
     val aestheticColors = listOf(
         Color(0xFFEF5350), // Red
         Color(0xFFFFA726), // Orange
@@ -61,7 +53,7 @@ fun AnalyticalPieChart(
     // Animation State
     val animationProgress = remember { Animatable(0f) }
 
-    LaunchedEffect(expenses) {
+    LaunchedEffect(data) {
         animationProgress.animateTo(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
@@ -73,18 +65,18 @@ fun AnalyticalPieChart(
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val strokeWidth = 24.dp.toPx()
+            val strokeWidth = 32.dp.toPx() // Increased slightly for visibility
             val radius = (size.minDimension - strokeWidth) / 2
             val center = Offset(size.width / 2, size.height / 2)
 
             var startAngle = -90f // Start from top
 
-            categoryTotals.forEachIndexed { index, (category, amount) ->
+            categoryTotals.forEachIndexed { index, (_, amount) ->
                 val sweepAngle = if (totalAmount > 0) {
                     (amount.toFloat() / totalAmount.toFloat()) * 360f
                 } else 0f
 
-                // Pick color cyclically so we never run out
+                // Pick color cyclically
                 val sliceColor = aestheticColors[index % aestheticColors.size]
 
                 // Draw Arc

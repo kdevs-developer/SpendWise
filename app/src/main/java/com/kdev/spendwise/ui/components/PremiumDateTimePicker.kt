@@ -3,12 +3,8 @@ package com.kdev.spendwise.ui.components
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.TargetedFlingBehavior
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.PageSize
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -140,14 +136,11 @@ fun TransactionDateTimePickerDialog(
                     TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray) }
                     Spacer(Modifier.width(8.dp))
 
-                    // UPDATED BUTTON LOGIC
                     Button(
                         onClick = {
                             if (isWheelMode) {
-                                // If in Wheel Mode, "Set" just switches to Grid view
                                 isWheelMode = false
                             } else {
-                                // If in Grid Mode, "Confirm" finishes the dialog
                                 val cal = Calendar.getInstance().apply { timeInMillis = selectedDate }
                                 val originalDay = cal.get(Calendar.DAY_OF_MONTH)
                                 cal.set(Calendar.YEAR, viewYear)
@@ -225,11 +218,9 @@ fun CalendarGrid(year: Int, month: Int, selectedDateMillis: Long, onDateSelected
 @Composable
 fun WheelDatePicker(initialMonth: Int, initialYear: Int, onSelectionChanged: (Int, Int) -> Unit, primaryColor: Color) {
     val months = remember { DateFormatSymbols().months.toList() }
-
     val currentYear = Calendar.getInstance().get(Calendar.YEAR)
     val years = remember { (1950..currentYear).map { it.toString() }.toList() }
 
-    // Internal state to avoid jumpiness
     var currentMonthIndex by remember { mutableIntStateOf(initialMonth) }
     var currentYearIndex by remember { mutableIntStateOf(years.indexOf(initialYear.toString()).coerceAtLeast(0)) }
 
@@ -261,6 +252,7 @@ fun WheelDatePicker(initialMonth: Int, initialYear: Int, onSelectionChanged: (In
     }
 }
 
+// --- FIXED PREMIUM WHEEL COLUMN ---
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun WheelColumn(
@@ -270,6 +262,7 @@ fun WheelColumn(
     primaryColor: Color,
     modifier: Modifier = Modifier
 ) {
+    val itemHeight = 40.dp
     val pagerState = rememberPagerState(initialPage = initialIndex) { items.size }
 
     LaunchedEffect(pagerState) {
@@ -279,13 +272,15 @@ fun WheelColumn(
     }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.fillMaxWidth().height(40.dp).background(primaryColor.copy(0.1f), RoundedCornerShape(8.dp)))
+        // Selection Indicator
+        Box(modifier = Modifier.fillMaxWidth().height(itemHeight).background(primaryColor.copy(0.1f), RoundedCornerShape(8.dp)))
 
         VerticalPager(
             state = pagerState,
-            pageSize = PageSize.Fixed(40.dp),
-            contentPadding = PaddingValues(vertical = 70.dp),
-            flingBehavior = rememberSnapFlingBehavior(lazyListState = rememberLazyListState()) as TargetedFlingBehavior
+            pageSize = PageSize.Fixed(itemHeight),
+            contentPadding = PaddingValues(vertical = 70.dp), // Keeps the middle item centered
+            // REMOVED: incorrect flingBehavior that caused "uneasy" scrolling.
+            // Default Pager snapping is much smoother.
         ) { page ->
             val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
             val scale = lerp(1f, 0.7f, pageOffset.coerceIn(0f, 1f))
@@ -293,13 +288,16 @@ fun WheelColumn(
 
             Box(
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(itemHeight)
                     .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha },
                 contentAlignment = Alignment.Center
             ) {
-                CompositionLocalProvider(LocalContentColor provides if(page == pagerState.currentPage) primaryColor else Color.Gray) {
-                    Text(text = items[page], style = MaterialTheme.typography.titleMedium, fontWeight = if(page == pagerState.currentPage) FontWeight.Bold else FontWeight.Normal)
-                }
+                Text(
+                    text = items[page],
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if(page == pagerState.currentPage) primaryColor else Color.Gray,
+                    fontWeight = if(page == pagerState.currentPage) FontWeight.Bold else FontWeight.Normal
+                )
             }
         }
     }

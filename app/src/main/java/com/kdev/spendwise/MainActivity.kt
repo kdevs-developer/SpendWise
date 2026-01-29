@@ -29,47 +29,52 @@ class MainActivity : FragmentActivity() {
         setContent {
             val viewModel: MainViewModel = viewModel()
 
-            // Splash State
+            // --- STATE MANAGEMENT ---
             var showComposeSplash by remember { mutableStateOf(true) }
 
-            // Biometric State: Default to authenticated if biometrics are disabled
+            // Biometrics: Default to authenticated if disabled, otherwise false until proven
             var isBiometricAuthenticated by remember { mutableStateOf(!viewModel.isBiometricEnabled) }
             val isCheckingAuth = viewModel.isCheckingAuthState
 
-            // 1. Trigger Biometric Prompt (Login)
+            // --- 1. BIOMETRIC LOGIC ---
+            // Trigger prompt only when: Logged In + Bio Enabled + Not yet Authenticated
             LaunchedEffect(viewModel.isLoggedIn, viewModel.isBiometricEnabled) {
                 if (viewModel.isLoggedIn && viewModel.isBiometricEnabled && !isBiometricAuthenticated) {
                     if (BiometricUtils.isBiometricAvailable(this@MainActivity)) {
                         BiometricUtils.showBiometricPrompt(
                             activity = this@MainActivity,
                             onSuccess = { isBiometricAuthenticated = true },
-                            onFailure = { finish() } // Exit if failed/cancelled
+                            onFailure = {
+                                // If they cancel/fail, we close the app to secure data
+                                finish()
+                            }
                         )
                     } else {
-                        isBiometricAuthenticated = true // Fallback
+                        // Fallback if hardware unavailable despite setting being true
+                        isBiometricAuthenticated = true
                     }
-                } else if (!viewModel.isBiometricEnabled) {
-                    isBiometricAuthenticated = true
-                }
-            }
-
-            // 2. Reset Biometric State on Logout
-            LaunchedEffect(viewModel.isLoggedIn) {
-                if (!viewModel.isLoggedIn) {
+                } else if (!viewModel.isLoggedIn) {
+                    // Reset if logged out
                     isBiometricAuthenticated = !viewModel.isBiometricEnabled
                 }
             }
 
+            // --- 2. UI THEME & CONTENT ---
             SpendWiseTheme(darkTheme = viewModel.isDarkMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Show Splash until Auth is checked AND Biometric (if required) is done
+                    // LOADING / SPLASH STATE
+                    // We show the splash if:
+                    // 1. The animation is still running
+                    // 2. Firebase is still checking auth
+                    // 3. User is logged in but hasn't passed Biometric check yet
                     if (showComposeSplash || isCheckingAuth || (viewModel.isLoggedIn && !isBiometricAuthenticated)) {
                         SplashScreen(onSplashFinished = { showComposeSplash = false })
                     } else {
 
+                        // --- MAIN CONTENT ---
                         if (viewModel.showOnboarding) {
                             OnboardingScreen(onGetStarted = { viewModel.completeOnboarding() })
                         } else if (!viewModel.isLoggedIn) {
@@ -80,22 +85,26 @@ class MainActivity : FragmentActivity() {
                                 "login" -> LoginScreen(
                                     viewModel = viewModel,
                                     onStartRegistration = { authScreenState = "registration_flow" },
-                                    onLoginSuccess = { /* State change handles navigation */ }
+                                    onLoginSuccess = { /* ViewModel state change triggers recomposition to Dashboard */ }
                                 )
                                 "registration_flow" -> RegistrationFlow(
                                     viewModel = viewModel,
-                                    onComplete = {
-                                        // Do nothing. isLoggedIn = true triggers navigation automatically.
-                                    }
+                                    onComplete = { /* ViewModel state change triggers recomposition */ }
                                 )
                             }
                         } else {
                             // --- DASHBOARD FLOW ---
                             var currentScreen by rememberSaveable { mutableStateOf("dashboard") }
+                            // Tracks where to go back to (e.g., Edit Card -> Wallet List)
+                            var returnScreen by rememberSaveable { mutableStateOf("dashboard") }
 
-                            // Handle Back Press to always go to Dashboard first
+                            // Global Back Handler
                             BackHandler(enabled = currentScreen != "dashboard") {
-                                currentScreen = "dashboard"
+                                if (currentScreen == "edit_card" && returnScreen == "wallet_list") {
+                                    currentScreen = "wallet_list"
+                                } else {
+                                    currentScreen = "dashboard"
+                                }
                             }
 
                             Box(modifier = Modifier.fillMaxSize()) {
@@ -103,8 +112,14 @@ class MainActivity : FragmentActivity() {
                                     "dashboard" -> DashboardScreen(
                                         viewModel = viewModel,
                                         onShowMoreClick = { currentScreen = "all_transactions" },
-                                        onShowWalletsClick = { currentScreen = "wallet_list" }, // Navigate to List
-                                        onEditCardClick = { currentScreen = "edit_card" },      // Navigate to Create New
+                                        onShowWalletsClick = {
+                                            currentScreen = "wallet_list"
+                                        },
+                                        onEditCardClick = {
+                                            // Direct add from dashboard
+                                            returnScreen = "dashboard"
+                                            currentScreen = "edit_card"
+                                        },
                                         onShowAnalysisClick = { currentScreen = "detailed_analysis" },
                                         onAddTransactionClick = {
                                             viewModel.clearEditState()
@@ -114,45 +129,74 @@ class MainActivity : FragmentActivity() {
                                         onRecurringClick = { currentScreen = "recurring_transactions" }
                                     )
 
-                                    // --- NEW: Wallet Management List ---
                                     "wallet_list" -> WalletListScreen(
                                         viewModel = viewModel,
                                         onBack = { currentScreen = "dashboard" },
                                         onAddWallet = {
                                             viewModel.walletToEdit = null
+                                            returnScreen = "wallet_list" // Return here after adding
                                             currentScreen = "edit_card"
                                         },
                                         onEditWallet = {
-                                            // viewModel.walletToEdit is set inside the list item click
+                                            returnScreen = "wallet_list" // Return here after editing
                                             currentScreen = "edit_card"
                                         }
+                                    )
+
+                                    "edit_card" -> EditCardScreen(
+                                        viewModel = viewModel,
+                                        onBack = { currentScreen = returnScreen }
                                     )
 
                                     "profile" -> ProfileScreen(
                                         viewModel = viewModel,
                                         onBack = { currentScreen = "dashboard" }
                                     )
+
                                     "add_transaction" -> AddTransactionScreen(
                                         viewModel = viewModel,
                                         onSaveSuccess = { currentScreen = "dashboard" },
                                         onBack = { currentScreen = "dashboard" }
                                     )
+
                                     "all_transactions" -> AllTransactionsScreen(
                                         viewModel = viewModel,
                                         onBack = { currentScreen = "dashboard" },
                                         onEditNavigate = { currentScreen = "add_transaction" }
                                     )
-                                    "edit_card" -> EditCardScreen(
+
+                                    "recurring_transactions" -> RecurringTransactionsScreen(
                                         viewModel = viewModel,
-                                        onBack = { currentScreen = "dashboard" } // Goes back to Dashboard usually
+                                        onBack = { currentScreen = "dashboard" },
+                                        onNavigateToAdd = {
+                                            viewModel.clearRecurringEdit() // Clear any old state
+                                            currentScreen = "add_recurring_rule"
+                                        },
+                                        onNavigateToEdit = { rule ->
+                                            viewModel.recurringRuleToEdit = rule // Set state in ViewModel
+                                            currentScreen = "add_recurring_rule"
+                                        }
+                                    )
+
+                                    // [NEW ROUTE]
+                                    "add_recurring_rule" -> AddRecurringRuleScreen(
+                                        viewModel = viewModel,
+                                        onBack = { currentScreen = "recurring_transactions" },
+                                        onSaveSuccess = {
+                                            viewModel.clearRecurringEdit()
+                                            currentScreen = "recurring_transactions"
+                                        }
                                     )
                                     "detailed_analysis" -> DetailedAnalysisScreen(
                                         viewModel = viewModel,
-                                        onBack = { currentScreen = "dashboard" }
+                                        onBack = { currentScreen = "dashboard" },
+                                        onNavigateToAccountSelect = { currentScreen = "analysis_account_select" } // [NEW]
                                     )
-                                    "recurring_transactions" -> RecurringTransactionsScreen(
+
+                                    // [NEW ROUTE]
+                                    "analysis_account_select" -> AnalysisWalletSelectionScreen(
                                         viewModel = viewModel,
-                                        onBack = { currentScreen = "dashboard" }
+                                        onBack = { currentScreen = "detailed_analysis" }
                                     )
                                 }
                             }

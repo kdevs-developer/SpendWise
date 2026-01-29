@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Keep all data classes used by Firestore
+# Replace 'com.kdev.spendwise.data' with your actual package name where your data classes are
+-keep class com.kdev.spendwise.data.** { *; }
+
+# Keep standard Firebase methods
+-keepattributes Signature
+-keepclassmembers class com.kdev.spendwise.data.** {
+  *;
+}

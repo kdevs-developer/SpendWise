@@ -10,6 +10,7 @@ import androidx.core.content.FileProvider
 import com.kdev.spendwise.data.Expense
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Date
 import kotlin.math.abs
 
 object PdfUtils {
@@ -17,10 +18,12 @@ object PdfUtils {
     fun exportTransactionsToPdf(
         context: Context,
         transactions: List<Expense>,
-        initialBalance: Double,   // Opening Balance
-        totalIncome: Double,      // Income for period
-        totalExpense: Double,     // Expense for period
-        availableBalance: Double  // Closing Balance
+        walletMap: Map<String, String>, // Map ID -> Bank Name
+        initialBalance: Double,
+        totalIncome: Double,
+        totalExpense: Double,
+        closingBalance: Double,
+        reportTitle: String = "Financial Report"
     ) {
         if (transactions.isEmpty()) {
             Toast.makeText(context, "No transactions to export", Toast.LENGTH_SHORT).show()
@@ -32,7 +35,6 @@ object PdfUtils {
         val pageHeight = 842
         var pageNumber = 1
 
-        // Create Page 1
         var pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
         var page = pdfDocument.startPage(pageInfo)
         var canvas: Canvas = page.canvas
@@ -44,13 +46,11 @@ object PdfUtils {
         val expenseColor = Color.parseColor("#D32F2F")
         val lightGray = Color.parseColor("#F8F9FA")
 
-        // ==========================================
-        // DRAW PAGE 1 HEADER (Logo & Summary)
-        // ==========================================
+        // 1. DRAW HEADER BACKGROUND
         paint.color = primaryColor
         canvas.drawRect(0f, 0f, pageWidth.toFloat(), 100f, paint)
 
-        // --- LOGO DRAWING LOGIC ---
+        // 2. DRAW VECTOR LOGO (Exact paths restored)
         val logoPaint = Paint().apply {
             isAntiAlias = true
             style = Paint.Style.FILL
@@ -99,144 +99,159 @@ object PdfUtils {
         canvas.drawPath(walletPath, logoPaint)
         logoPaint.shader = null
 
-        // Header Text
+        // 3. TITLE TEXT
         paint.color = Color.WHITE
         paint.textSize = 28f
         paint.isFakeBoldText = true
         canvas.drawText("SpendWise", 90f, 55f, paint)
         paint.textSize = 12f
         paint.isFakeBoldText = false
-        canvas.drawText("Financial Report", 90f, 75f, paint)
+        canvas.drawText(reportTitle, 90f, 75f, paint)
         paint.textAlign = Paint.Align.RIGHT
         canvas.drawText("Generated: ${DateUtils.formatDate(System.currentTimeMillis())}", 570f, 55f, paint)
 
-        // Summary Cards
-        paint.textAlign = Paint.Align.LEFT
+        // 4. SUMMARY CARD (Evenly Spaced)
         val cardY = 120f
+        val startX = 20f
+        val endX = 575f
+        val usableWidth = endX - startX
+
+        // Calculate even anchor points for 3 columns
+        val col1 = startX + 20f             // Left
+        val col2 = startX + (usableWidth / 2) // Center
+        val col3 = endX - 20f               // Right
+
         paint.color = lightGray
-        canvas.drawRoundRect(20f, cardY, 575f, cardY + 90f, 20f, 20f, paint)
+        canvas.drawRoundRect(startX, cardY, endX, cardY + 90f, 20f, 20f, paint)
 
-        paint.textSize = 11f
+        // Labels
+        paint.textSize = 9f
         paint.color = Color.GRAY
-        canvas.drawText("OPENING BALANCE", 45f, cardY + 30f, paint)
-        canvas.drawText("INCOME", 220f, cardY + 30f, paint)
-        canvas.drawText("EXPENSE", 380f, cardY + 30f, paint)
-
-        paint.textSize = 15f
         paint.isFakeBoldText = true
+
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("OPENING BALANCE", col1, cardY + 30f, paint)
+
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("TOTAL INCOME", col2, cardY + 30f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("TOTAL EXPENSE", col3, cardY + 30f, paint)
+
+        // Values
+        paint.textSize = 14f
+        paint.isFakeBoldText = true
+
+        paint.textAlign = Paint.Align.LEFT
         paint.color = Color.BLACK
-        canvas.drawText(CurrencyUtils.formatINR(initialBalance), 45f, cardY + 60f, paint)
+        canvas.drawText(CurrencyUtils.formatINR(initialBalance), col1, cardY + 60f, paint)
+
+        paint.textAlign = Paint.Align.CENTER
         paint.color = incomeColor
-        canvas.drawText("+ ${CurrencyUtils.formatINR(totalIncome)}", 220f, cardY + 60f, paint)
+        canvas.drawText("+ ${CurrencyUtils.formatINR(totalIncome)}", col2, cardY + 60f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
         paint.color = expenseColor
-        canvas.drawText("- ${CurrencyUtils.formatINR(totalExpense)}", 380f, cardY + 60f, paint)
+        canvas.drawText("- ${CurrencyUtils.formatINR(totalExpense)}", col3, cardY + 60f, paint)
 
         // Closing Balance Bar
         paint.color = primaryColor
-        canvas.drawRect(20f, cardY + 90f, 575f, cardY + 130f, paint)
+        canvas.drawRect(startX, cardY + 90f, endX, cardY + 120f, paint)
         paint.color = Color.WHITE
-        paint.textSize = 14f
-        canvas.drawText("CLOSING BALANCE", 45f, cardY + 116f, paint)
+        paint.textSize = 12f
+
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("CLOSING BALANCE", col1, cardY + 110f, paint)
+
         paint.textAlign = Paint.Align.RIGHT
-        canvas.drawText(CurrencyUtils.formatINR(availableBalance), 550f, cardY + 116f, paint)
+        canvas.drawText(CurrencyUtils.formatINR(closingBalance), col3, cardY + 110f, paint)
+        // 5. TABLE COLUMNS
+        // Date(30), Bank(110), Title(210), Cat(360), Amt(500)
+        val colDate = 30f
+        val colBank = 110f
+        val colTitle = 210f
+        val colCat = 360f
+        val colAmt = 500f
 
-        // ==========================================
-        // TABLE SETUP
-        // ==========================================
-        val colDate = 35f
-        val colTitle = 135f
-        val colCategory = 320f
-        val colAmount = 480f
-
-        // Helper to draw table headers
         fun drawTableHeaders(y: Float) {
             paint.textAlign = Paint.Align.LEFT
             paint.color = Color.parseColor("#E8EAF6")
-            canvas.drawRect(20f, y - 20f, 575f, y + 10f, paint)
-
+            canvas.drawRect(20f, y - 15f, 575f, y + 10f, paint)
             paint.color = primaryColor
-            paint.textSize = 13f
+            paint.textSize = 11f
             paint.isFakeBoldText = true
             canvas.drawText("DATE", colDate, y, paint)
+            canvas.drawText("ACCOUNT", colBank, y, paint) // New Column
             canvas.drawText("DESCRIPTION", colTitle, y, paint)
-            canvas.drawText("CATEGORY", colCategory, y, paint)
-            canvas.drawText("AMOUNT", colAmount, y, paint)
+            canvas.drawText("CATEGORY", colCat, y, paint)
+            canvas.drawText("AMOUNT", colAmt, y, paint)
             paint.isFakeBoldText = false
         }
 
-        var currentY = 285f
+        var currentY = 280f
         drawTableHeaders(currentY)
-        currentY += 35f
+        currentY += 30f
 
-        // ==========================================
-        // ROWS WITH PAGINATION
-        // ==========================================
-        paint.textSize = 11f
+        paint.textSize = 10f
 
-        for ((index, expense) in transactions.withIndex()) {
-
-            // --- PAGINATION LOGIC ---
+        for ((index, tx) in transactions.withIndex()) {
+            // Pagination
             if (currentY > pageHeight - 50) {
-                // 1. Finish current page
                 pdfDocument.finishPage(page)
-
-                // 2. Start new page
                 pageNumber++
                 pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create()
                 page = pdfDocument.startPage(pageInfo)
                 canvas = page.canvas
 
-                // 3. Draw Simplified Header on new page
+                // Simple Header
                 paint.color = primaryColor
-                canvas.drawRect(0f, 0f, pageWidth.toFloat(), 60f, paint)
+                canvas.drawRect(0f, 0f, pageWidth.toFloat(), 40f, paint)
                 paint.color = Color.WHITE
-                paint.textSize = 16f
-                paint.isFakeBoldText = true
+                paint.textSize = 12f
                 paint.textAlign = Paint.Align.LEFT
-                canvas.drawText("SpendWise Report (Page $pageNumber)", 30f, 38f, paint)
+                canvas.drawText("SpendWise Report - Page $pageNumber", 20f, 25f, paint)
 
-                // 4. Reset Y and draw table header again
-                currentY = 100f
+                currentY = 80f
                 drawTableHeaders(currentY)
-                currentY += 35f
-                paint.textSize = 11f
+                currentY += 30f
+                paint.textSize = 10f
             }
 
-            // Draw Zebra Striping
+            // Zebra Striping
             if (index % 2 != 0) {
-                paint.color = Color.parseColor("#FDFDFD")
-                canvas.drawRect(20f, currentY - 18f, 575f, currentY + 10f, paint)
+                paint.color = Color.parseColor("#F9F9F9")
+                canvas.drawRect(20f, currentY - 12f, 575f, currentY + 8f, paint)
             }
 
             paint.color = Color.BLACK
             paint.textAlign = Paint.Align.LEFT
-            canvas.drawText(DateUtils.formatDate(expense.date), colDate, currentY, paint)
 
-            val safeTitle = if (expense.title.length > 22) expense.title.take(20) + ".." else expense.title
-            canvas.drawText(safeTitle, colTitle, currentY, paint)
+            // Data
+            canvas.drawText(DateUtils.formatDate(tx.date).dropLast(5), colDate, currentY, paint)
+
+            // BANK NAME (New)
+            val bank = walletMap[tx.walletId] ?: "Unknown"
+            canvas.drawText(bank.take(12), colBank, currentY, paint)
+
+            canvas.drawText(tx.title.take(20), colTitle, currentY, paint)
 
             paint.color = Color.GRAY
-            val catShort = if (expense.category.length > 20) expense.category.take(18) + ".." else expense.category
-            canvas.drawText(catShort, colCategory, currentY, paint)
+            canvas.drawText(tx.category.substringBefore(" -> ").take(15), colCat, currentY, paint)
 
-            val isIncome = expense.amount > 0 || expense.type == "INCOME"
-            // Special handling for Transfer (could be neg or pos depending on logic, but usually we just show amount)
-            // Assuming amount in Expense object is signed correctly
-            val amountText = if(isIncome) "+ ${CurrencyUtils.formatINR(abs(expense.amount))}" else "- ${CurrencyUtils.formatINR(abs(expense.amount))}"
-
+            val isIncome = tx.amount > 0 || tx.type == "INCOME"
+            paint.color = if (tx.amount >= 0) incomeColor else expenseColor
             paint.isFakeBoldText = true
-            paint.color = if (expense.amount >= 0) incomeColor else expenseColor
-            canvas.drawText(amountText, colAmount, currentY, paint)
-
+            val sign = if (tx.amount >= 0) "+" else "-"
+            canvas.drawText("$sign ${CurrencyUtils.formatINR(abs(tx.amount))}", colAmt, currentY, paint)
             paint.isFakeBoldText = false
-            currentY += 30f
+
+            currentY += 25f
         }
 
-        // Finish the final page
         pdfDocument.finishPage(page)
 
-        // Save File
-        val file = File(context.cacheDir, "SpendWise_Report.pdf")
+        // Save & Share
+        val file = File(context.cacheDir, "SpendWise_Report_${System.currentTimeMillis()}.pdf")
         try {
             pdfDocument.writeTo(FileOutputStream(file))
             sharePdf(context, file)

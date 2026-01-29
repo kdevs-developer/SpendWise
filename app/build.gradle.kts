@@ -32,7 +32,6 @@ android {
     }
     buildTypes {
         release {
-
             isMinifyEnabled = true
             isShrinkResources = true
 
@@ -51,6 +50,16 @@ dependencies {
     implementation(libs.androidx.compose.animation)
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.androidx.compose.animation.core)
+
+    // --- BACKGROUND TASKS (Required for Recurring Transactions) ---
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // --- NAVIGATION (Critical New Dependency) ---
+    implementation("androidx.navigation:navigation-compose:2.9.6")
+    implementation(libs.firebase.crashlytics.buildtools)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.foundation)
+
     // These should now resolve correctly
     val bom = platform(libs.androidx.compose.bom)
     implementation(bom)
@@ -60,24 +69,30 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
+
+    // --- ICONS ---
     implementation(libs.androidx.material.icons.extended)
 
     // Firebase BOM (Bill of Materials)
-    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation(platform("com.google.firebase:firebase-bom:34.7.0"))
 
     // Firebase Auth & Firestore
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     implementation("androidx.core:core-splashscreen:1.2.0")
 
+    // Auth (Kept only the newer version)
     implementation("com.google.android.gms:play-services-auth:21.4.0")
 
     implementation("androidx.biometric:biometric:1.1.0")
 
+    //Test
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.10.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.10.0")
+
     // Room Persistence
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler) // KSP handles the annotation processing
+    ksp(libs.androidx.room.compiler)
 }

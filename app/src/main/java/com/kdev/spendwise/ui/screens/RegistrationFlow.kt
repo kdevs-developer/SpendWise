@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.PageSize
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -308,6 +309,76 @@ fun GenderPickerDialog(
 // ==========================================
 //      DOB PICKER COMPONENTS (UPDATED)
 // ==========================================
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun GenericWheelColumn(
+    items: List<String>,
+    initialIndex: Int,
+    onItemSelected: (Int) -> Unit,
+    primaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex) { items.size }
+
+    LaunchedEffect(pagerState.settledPage) {
+        onItemSelected(pagerState.settledPage)
+    }
+
+    Box(
+        modifier = modifier.height(200.dp), // Increased container height
+        contentAlignment = Alignment.Center
+    ) {
+        // Selection Indicator Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp) // Slightly taller bar
+                .padding(horizontal = 4.dp)
+                .background(primaryColor.copy(0.1f), RoundedCornerShape(12.dp))
+        )
+
+        VerticalPager(
+            state = pagerState,
+            flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
+            contentPadding = PaddingValues(vertical = 76.dp), // Fine-tuned for 200.dp height
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 2,
+            userScrollEnabled = true
+        ) { page ->
+            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+
+            // Reduced max scale slightly to prevent clipping and used alpha for focus
+            val scale = 1f - (pageOffset.absoluteValue * 0.25f).coerceIn(0f, 0.4f)
+            val alpha = 1f - (pageOffset.absoluteValue * 0.6f).coerceIn(0f, 0.8f)
+            val rotationX = (pageOffset * 25f).coerceIn(-45f, 45f)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp) // Match the indicator bar height
+                    .graphicsLayer {
+                        this.scaleX = scale
+                        this.scaleY = scale
+                        this.alpha = alpha
+                        this.rotationX = rotationX
+                        this.cameraDistance = 12 * density
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = items[page],
+                    // Reduced size from titleLarge to titleMedium for better fit
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (pagerState.currentPage == page) primaryColor else Color.Gray,
+                    fontWeight = if (pagerState.currentPage == page) FontWeight.ExtraBold else FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -317,75 +388,89 @@ fun DobPickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (Long) -> Unit
 ) {
-    // Current selected date (for Grid)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var selectedDate by remember { mutableLongStateOf(initialDateMillis) }
 
-    // Navigation State (Current view focus)
     var viewYear by remember { mutableIntStateOf(Calendar.getInstance().apply { timeInMillis = initialDateMillis }.get(Calendar.YEAR)) }
     var viewMonth by remember { mutableIntStateOf(Calendar.getInstance().apply { timeInMillis = initialDateMillis }.get(Calendar.MONTH)) }
 
-    // Toggle Mode
     var isWheelMode by remember { mutableStateOf(false) }
 
     val monthName = remember(viewMonth) {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.MONTH, viewMonth)
-        SimpleDateFormat("MMMM", Locale.getDefault()).format(cal.time)
+        SimpleDateFormat("MMMM", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.MONTH, viewMonth) }.time)
     }
 
     val monthsList = remember { DateFormatSymbols().months.filter { it.isNotEmpty() } }
-    val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
-    val yearsList = remember { (1900..currentYear).map { it.toString() }.toList() }
+    val yearsList = remember { (1900..Calendar.getInstance().get(Calendar.YEAR)).map { it.toString() } }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            modifier = Modifier.fillMaxWidth().padding(16.dp).wrapContentHeight(),
-            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp) // More breathing room
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(32.dp), // More rounded for modern look
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
+            tonalElevation = 8.dp
         ) {
-            Column(Modifier.padding(20.dp)) {
-
+            Column(Modifier.padding(24.dp)) {
                 Text(
-                    "Select Date of Birth",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    "Date of Birth",
+                    style = MaterialTheme.typography.labelLarge,
                     color = Color.Gray,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp)
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp)
                 )
 
-                // HEADER (Switch between Wheel and Grid)
+                // --- HEADER ---
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Hide arrows in Wheel Mode
-                    if(!isWheelMode) {
-                        IconButton(onClick = { if (viewMonth == 0) { viewMonth = 11; viewYear-- } else { viewMonth-- } }) { Icon(Icons.Default.ChevronLeft, null) }
-                    } else { Spacer(Modifier.size(48.dp)) }
+                    if (!isWheelMode) {
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                if (viewMonth == 0) { viewMonth = 11; viewYear-- } else { viewMonth-- }
+                            },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(0.4f), CircleShape)
+                        ) { Icon(Icons.Default.ChevronLeft, null) }
+                    } else Spacer(Modifier.size(40.dp))
 
                     TextButton(
-                        onClick = { isWheelMode = !isWheelMode },
-                        colors = ButtonDefaults.textButtonColors(contentColor = primaryColor)
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            isWheelMode = !isWheelMode
+                        },
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("$monthName $viewYear", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
-                        Icon(if(isWheelMode) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, Modifier.padding(start = 4.dp))
+                        Text(
+                            "$monthName $viewYear",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = primaryColor
+                        )
+                        Icon(if (isWheelMode) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null, tint = primaryColor)
                     }
 
-                    if(!isWheelMode) {
-                        IconButton(onClick = { if (viewMonth == 11) { viewMonth = 0; viewYear++ } else { viewMonth++ } }) { Icon(Icons.Default.ChevronRight, null) }
-                    } else { Spacer(Modifier.size(48.dp)) }
+                    if (!isWheelMode) {
+                        IconButton(
+                            onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                if (viewMonth == 11) { viewMonth = 0; viewYear++ } else { viewMonth++ }
+                            },
+                            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(0.4f), CircleShape)
+                        ) { Icon(Icons.Default.ChevronRight, null) }
+                    } else Spacer(Modifier.size(40.dp))
                 }
 
-                // CONTENT
+                // --- CONTENT ---
                 AnimatedContent(
                     targetState = isWheelMode,
                     transitionSpec = {
-                        (fadeIn(animationSpec = tween(200)) + scaleIn(initialScale = 0.95f, animationSpec = tween(200))) togetherWith
-                                (fadeOut(animationSpec = tween(200)))
+                        (scaleIn(tween(300)) + fadeIn()).togetherWith(scaleOut(tween(200)) + fadeOut())
                     },
-                    label = "CalendarSwitch"
+                    label = "PickerTransition"
                 ) { showWheel ->
                     if (showWheel) {
                         DobWheelDatePicker(
@@ -404,140 +489,38 @@ fun DobPickerDialog(
                             year = viewYear,
                             month = viewMonth,
                             selectedDateMillis = selectedDate,
-                            onDateSelected = { selectedDate = it },
+                            onDateSelected = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                selectedDate = it
+                            },
                             primaryColor = primaryColor
                         )
                     }
                 }
 
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(32.dp))
 
-                // ACTION BUTTONS
-                Row(Modifier.fillMaxWidth(), Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Cancel", color = Color.Gray) }
-                    Spacer(Modifier.width(8.dp))
+                // --- ACTIONS ---
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, Color.LightGray.copy(0.5f))
+                    ) { Text("Cancel", color = Color.Gray) }
 
-                    // UPDATED BUTTON LOGIC
                     Button(
                         onClick = {
-                            if (isWheelMode) {
-                                // If in Wheel Mode, "Set" switches to Calendar Grid
-                                isWheelMode = false
-                            } else {
-                                // If in Calendar Mode, "Confirm" finishes selection
-                                onConfirm(selectedDate)
-                            }
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            if (isWheelMode) isWheelMode = false else onConfirm(selectedDate)
                         },
+                        modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        // Dynamic Text: Set vs Confirm
-                        Text(if (isWheelMode) "Set" else "Confirm", fontWeight = FontWeight.Bold)
+                        Text(if (isWheelMode) "Set Date" else "Confirm", fontWeight = FontWeight.Bold)
                     }
                 }
-            }
-        }
-    }
-}
-
-// --- CALENDAR GRID ---
-@Composable
-fun DobCalendarGrid(year: Int, month: Int, selectedDateMillis: Long, onDateSelected: (Long) -> Unit, primaryColor: Color) {
-    val calendar = Calendar.getInstance().apply { set(Calendar.YEAR, year); set(Calendar.MONTH, month); set(Calendar.DAY_OF_MONTH, 1) }
-    val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val startDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
-    val weekDays = listOf("S", "M", "T", "W", "T", "F", "S")
-
-    val todayStart = Calendar.getInstance().apply {
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-    }
-
-    Column {
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-            weekDays.forEach { day -> Text(day, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, color = Color.Gray, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        val totalSlots = (startDayOfWeek - 1) + daysInMonth
-        val rows = (totalSlots / 7) + if (totalSlots % 7 == 0) 0 else 1
-
-        for (row in 0 until rows) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), Arrangement.SpaceBetween) {
-                for (col in 0 until 7) {
-                    val dayIndex = (row * 7 + col) - (startDayOfWeek - 1) + 1
-                    if (dayIndex in 1..daysInMonth) {
-                        val currentDayCal = Calendar.getInstance().apply { set(Calendar.YEAR, year); set(Calendar.MONTH, month); set(Calendar.DAY_OF_MONTH, dayIndex); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
-                        val selectedCal = Calendar.getInstance().apply { timeInMillis = selectedDateMillis }
-                        val isSelected = currentDayCal.get(Calendar.YEAR) == selectedCal.get(Calendar.YEAR) && currentDayCal.get(Calendar.DAY_OF_YEAR) == selectedCal.get(Calendar.DAY_OF_YEAR)
-                        val isFuture = currentDayCal.timeInMillis > todayStart.timeInMillis
-
-                        Box(
-                            modifier = Modifier.weight(1f).aspectRatio(1f).clip(CircleShape)
-                                .background(if (isSelected) primaryColor else Color.Transparent)
-                                .clickable(enabled = !isFuture) { onDateSelected(currentDayCal.timeInMillis) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = dayIndex.toString(),
-                                color = if (isSelected) Color.White else if(isFuture) Color.LightGray.copy(0.4f) else MaterialTheme.colorScheme.onSurface,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
-                    }
-                }
-            }
-        }
-    }
-}
-
-// --- OPTIMIZED WHEEL COMPONENTS ---
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun GenericWheelColumn(
-    items: List<String>,
-    initialIndex: Int,
-    onItemSelected: (Int) -> Unit,
-    primaryColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val pagerState = rememberPagerState(initialPage = initialIndex) { items.size }
-
-    // Use snapshotFlow to detect settled page changes only
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }.collect { page ->
-            onItemSelected(page)
-        }
-    }
-
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.fillMaxWidth().height(40.dp).background(primaryColor.copy(0.1f), RoundedCornerShape(8.dp)))
-
-        VerticalPager(
-            state = pagerState,
-            pageSize = PageSize.Fixed(40.dp),
-            contentPadding = PaddingValues(vertical = 70.dp),
-            flingBehavior = rememberSnapFlingBehavior(lazyListState = rememberLazyListState()) as TargetedFlingBehavior
-        ) { page ->
-            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
-            val scale = lerp(1f, 0.7f, pageOffset.coerceIn(0f, 1f))
-            val alpha = lerp(1f, 0.3f, pageOffset.coerceIn(0f, 1f))
-
-            Box(
-                modifier = Modifier
-                    .height(40.dp)
-                    .graphicsLayer { scaleX = scale; scaleY = scale; this.alpha = alpha },
-                contentAlignment = Alignment.Center
-            ) {
-                val isSelected = page == pagerState.currentPage
-                Text(
-                    text = items[page],
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if(isSelected) primaryColor else Color.Gray,
-                    fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal
-                )
             }
         }
     }
@@ -552,32 +535,99 @@ fun DobWheelDatePicker(
     onSelectionChanged: (Int, Int) -> Unit,
     primaryColor: Color
 ) {
-    // Isolate local state to avoid jumpy behavior
-    var currentMonthIndex by remember { mutableIntStateOf(initialMonth) }
-    var currentYearIndex by remember { mutableIntStateOf(years.indexOf(initialYear.toString()).coerceAtLeast(0)) }
+    var currentMonth by remember { mutableIntStateOf(initialMonth) }
+    var currentYear by remember { mutableIntStateOf(initialYear) }
 
-    Row(modifier = Modifier.fillMaxWidth().height(180.dp), horizontalArrangement = Arrangement.Center) {
+    Row(Modifier.fillMaxWidth().height(180.dp), Arrangement.Center) {
         GenericWheelColumn(
             items = months,
-            initialIndex = currentMonthIndex,
-            onItemSelected = { index ->
-                currentMonthIndex = index
-                val yearStr = years.getOrNull(currentYearIndex) ?: years.last()
-                onSelectionChanged(currentMonthIndex, yearStr.toInt())
+            initialIndex = initialMonth,
+            onItemSelected = {
+                currentMonth = it
+                onSelectionChanged(currentMonth, currentYear)
             },
             primaryColor = primaryColor,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1.2f)
         )
         GenericWheelColumn(
             items = years,
-            initialIndex = currentYearIndex,
-            onItemSelected = { index ->
-                currentYearIndex = index
-                val yearStr = years[index]
-                onSelectionChanged(currentMonthIndex, yearStr.toInt())
+            initialIndex = years.indexOf(initialYear.toString()).coerceAtLeast(0),
+            onItemSelected = {
+                currentYear = years[it].toInt()
+                onSelectionChanged(currentMonth, currentYear)
             },
             primaryColor = primaryColor,
             modifier = Modifier.weight(1f)
         )
+    }
+}
+
+@Composable
+fun DobCalendarGrid(year: Int, month: Int, selectedDateMillis: Long, onDateSelected: (Long) -> Unit, primaryColor: Color) {
+    //
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, month)
+        set(Calendar.DAY_OF_MONTH, 1)
+    }
+    val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val startDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
+    val weekDays = listOf("S", "M", "T", "W", "T", "F", "S")
+
+    Column {
+        Row(Modifier.fillMaxWidth()) {
+            weekDays.forEach { day ->
+                Text(
+                    text = day,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Gray.copy(0.7f),
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        val totalSlots = (startDayOfWeek - 1) + daysInMonth
+        val rows = (totalSlots + 6) / 7
+
+        for (row in 0 until rows) {
+            Row(Modifier.fillMaxWidth()) {
+                for (col in 0 until 7) {
+                    val dayIndex = (row * 7 + col) - (startDayOfWeek - 1) + 1
+                    if (dayIndex in 1..daysInMonth) {
+                        val currentDayCal = Calendar.getInstance().apply {
+                            set(year, month, dayIndex, 0, 0, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        val isSelected = currentDayCal.timeInMillis == Calendar.getInstance().apply {
+                            timeInMillis = selectedDateMillis
+                            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                        }.timeInMillis
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .padding(2.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) primaryColor else Color.Transparent)
+                                .clickable { onDateSelected(currentDayCal.timeInMillis) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = dayIndex.toString(),
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.weight(1f).aspectRatio(1f))
+                    }
+                }
+            }
+        }
     }
 }

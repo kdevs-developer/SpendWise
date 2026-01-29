@@ -21,7 +21,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -34,7 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kdev.spendwise.data.Wallet
 import com.kdev.spendwise.ui.MainViewModel
-import com.kdev.spendwise.ui.cardThemes
+import com.kdev.spendwise.data.cardThemes
+import com.kdev.spendwise.ui.components.PremiumAlertDialog
 import com.kdev.spendwise.util.CurrencyUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,7 +52,9 @@ fun EditCardScreen(
     // Default to "Savings" if new, or use existing name
     var walletType by remember { mutableStateOf(editingWallet?.name ?: "Savings") }
 
-    var last4Digits by remember { mutableStateOf(editingWallet?.last4Digits ?: "") }
+    // --- FIX: Using 'cardNumber' to match your Wallet Data Class ---
+    var cardNumber by remember { mutableStateOf(editingWallet?.cardNumber ?: "") }
+
     var balance by remember { mutableStateOf(editingWallet?.balance?.toString() ?: "") }
     var selectedThemeIndex by remember { mutableIntStateOf(editingWallet?.cardThemeId ?: 0) }
 
@@ -62,11 +64,27 @@ fun EditCardScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (editingWallet == null) "Add Wallet" else "Edit Wallet", fontWeight = FontWeight.Bold) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null) } },
+                title = {
+                    Column {
+                        Text(
+                            text = if (editingWallet == null) "Add Wallet" else "Edit Wallet",
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (editingWallet == null) "Set up a new bank account" else "Update account or bank info",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
                 actions = {
                     if (editingWallet != null) {
-                        IconButton(onClick = { showDeleteDialog = true }) { // Trigger Dialog
+                        IconButton(onClick = { showDeleteDialog = true }) {
                             Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
                         }
                     }
@@ -144,8 +162,10 @@ fun EditCardScreen(
                             fontWeight = FontWeight.Medium,
                             fontSize = 14.sp
                         )
+                        // --- PREVIEW: Shows what you type instantly ---
+                        val displayNum = if (cardNumber.isNotEmpty()) cardNumber.takeLast(4).padEnd(4, ' ') else "1234"
                         Text(
-                            text = "**** **** **** ${last4Digits.take(4).padEnd(4, ' ')}",
+                            text = "**** **** **** $displayNum",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
@@ -205,10 +225,10 @@ fun EditCardScreen(
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.weight(1f)) {
-                    // UPDATED LABEL: Shortened to "Last 4" to fit on one line
+                    // --- INPUT FIELD: Card Number (Last 4 Digits) ---
                     PremiumTextField(
-                        value = last4Digits,
-                        onValueChange = { if (it.length <= 4) last4Digits = it },
+                        value = cardNumber,
+                        onValueChange = { if (it.length <= 4) cardNumber = it },
                         label = "Last 4",
                         icon = Icons.Default.Pin,
                         keyboardType = KeyboardType.Number
@@ -234,11 +254,13 @@ fun EditCardScreen(
                         Toast.makeText(context, "Please enter a Bank Name", Toast.LENGTH_SHORT).show()
                     } else {
                         val balVal = balance.toDoubleOrNull() ?: 0.0
+
+                        // --- CREATING WALLET OBJECT CORRECTLY ---
                         val wallet = Wallet(
                             id = editingWallet?.id ?: "",
                             name = walletType, // Save type as name
                             bankName = bankName,
-                            last4Digits = last4Digits,
+                            cardNumber = cardNumber, // MATCHING VARIABLE NAME
                             balance = balVal,
                             cardThemeId = selectedThemeIndex
                         )
@@ -261,55 +283,29 @@ fun EditCardScreen(
 
     // --- DELETE CONFIRMATION DIALOG ---
     if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            icon = {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error)
+        PremiumAlertDialog(
+            title = "Delete Wallet?",
+            message = "Are you sure you want to delete this wallet? All transaction history associated with it will be lost permanently.",
+            confirmText = "Delete",
+            dismissText = "Cancel",
+            icon = Icons.Default.DeleteForever,
+            confirmButtonColor = MaterialTheme.colorScheme.error, // Red for destructive action
+            iconColor = MaterialTheme.colorScheme.error,
+            onConfirm = {
+                editingWallet?.let { wallet ->
+                    viewModel.deleteWallet(wallet.id) {
+                        showDeleteDialog = false
+                        onBack()
+                    }
                 }
             },
-            title = { Text("Delete Wallet?", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to delete this wallet? All history will be lost.", textAlign = TextAlign.Center) },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(24.dp),
-            confirmButton = {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(
-                        onClick = { showDeleteDialog = false },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Gray),
-                        shape = RoundedCornerShape(12.dp)
-                    ) { Text("Cancel", fontWeight = FontWeight.Bold) }
-
-                    Button(
-                        onClick = {
-                            if (editingWallet != null) {
-                                viewModel.deleteWallet(editingWallet.id) {
-                                    showDeleteDialog = false
-                                    onBack()
-                                }
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(12.dp)
-                    ) { Text("Delete", fontWeight = FontWeight.Bold) }
-                }
-            },
-            dismissButton = null
+            onDismiss = { showDeleteDialog = false }
         )
     }
 }
 
-// --- NEW COMPONENT: Premium Dropdown ---
+// --- COMPONENTS ---
+
 @Composable
 fun PremiumDropdown(
     options: List<String>,
@@ -388,7 +384,7 @@ fun PremiumTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) }, // Ensure single line
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),

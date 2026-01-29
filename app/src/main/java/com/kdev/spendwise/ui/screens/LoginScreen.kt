@@ -41,16 +41,20 @@ fun LoginScreen(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val premiumGradient = Brush.linearGradient(
-        colors = listOf(
-            Color(0xFF4F5B93), // Start color (Offset 0)
-            Color(0xFFE0E4FF)  // End color (Offset 1)
+    // Premium Gradient Logic
+    val premiumGradient = remember {
+        Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF4F5B93), // Start color
+                Color(0xFFE0E4FF)  // End color
+            )
         )
-    )
+    }
+
     // Configure Google Sign-In
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken(context.getString(R.string.default_web_client_id)) // Ensure this ID is in strings.xml
+            .requestIdToken(context.getString(R.string.default_web_client_id)) // Make sure this exists in strings.xml
             .requestEmail()
             .build()
     }
@@ -81,8 +85,8 @@ fun LoginScreen(
                 }
             } catch (e: ApiException) {
                 isLoading = false
-                Log.e("LoginScreen", "Google Sign-In failed", e)
-                errorMessage = "Login failed. Please try again."
+                Log.e("LoginScreen", "Google Sign-In failed code: ${e.statusCode}", e)
+                errorMessage = "Login failed. Please check your internet connection."
             }
         } else {
             isLoading = false
@@ -102,7 +106,7 @@ fun LoginScreen(
                 .padding(32.dp)
                 .fillMaxWidth()
         ) {
-            // --- UPDATED: APP LOGO (No Circle) ---
+            // --- APP LOGO (Gradient) ---
             Icon(
                 imageVector = Icons.Default.AccountBalanceWallet,
                 contentDescription = null,
@@ -122,13 +126,13 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- UPDATED: WELCOME TEXT (Centered for Small Screens) ---
+            // --- WELCOME TEXT ---
             Text(
                 text = "Welcome to SpendWise",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF1A1C29),
-                textAlign = TextAlign.Center, // Ensures it looks good if it breaks to 2 lines
+                textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -148,7 +152,6 @@ fun LoginScreen(
                 CircularProgressIndicator(color = Color(0xFF4F5B93))
             } else {
 
-                // Helper Text
                 Text(
                     text = "Sign in with",
                     style = MaterialTheme.typography.labelMedium,
@@ -166,14 +169,15 @@ fun LoginScreen(
                         launcher.launch(googleSignInClient.signInIntent)
                     },
                     modifier = Modifier
-                        .size(70.dp) // Circular Size
+                        .size(70.dp)
                         .shadow(8.dp, CircleShape),
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White),
                     shape = CircleShape,
-                    contentPadding = PaddingValues(0.dp) // Reset padding for icon centering
+                    contentPadding = PaddingValues(0.dp)
                 ) {
+                    // Ensure you have R.drawable.ic_google in your drawable folder
                     Image(
-                        painter = painterResource(id = R.drawable.ic_google), // Ensure you have a google logo drawable
+                        painter = painterResource(id = R.drawable.ic_google),
                         contentDescription = "Google Login",
                         modifier = Modifier.size(32.dp)
                     )

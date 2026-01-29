@@ -5,8 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.rounded.* import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,28 +20,15 @@ import com.kdev.spendwise.R
 import com.kdev.spendwise.data.Expense
 import com.kdev.spendwise.data.RecurringRule
 import com.kdev.spendwise.data.Wallet
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.UUID
 import kotlin.math.abs
-
-data class CardTheme(val start: Color, val end: Color, val name: String)
-
-val cardThemes = listOf(
-    CardTheme(Color(0xFF1E3C72), Color(0xFF2A5298), "Classic Blue"),
-    CardTheme(Color(0xFF00c6ff), Color(0xFF0072ff), "Azure Lane"),
-    CardTheme(Color(0xFF1A2980), Color(0xFF26D0CE), "Aquamarine"),
-    CardTheme(Color(0xFF11998e), Color(0xFF38ef7d), "Mint Green"),
-    CardTheme(Color(0xFF56ab2f), Color(0xFFa8e063), "Lush Bamboo"),
-    CardTheme(Color(0xFF8E2DE2), Color(0xFF4A00E0), "Royal Purple"),
-    CardTheme(Color(0xFF834d9b), Color(0xFFd04ed6), "Mystic Purple"),
-    CardTheme(Color(0xFF860029), Color(0xFFC31432), "Axis Burgundy"),
-    CardTheme(Color(0xFFFF512F), Color(0xFFDD2476), "Sunset Orange"),
-    CardTheme(Color(0xFFCC95C0), Color(0xFF7AA1D2), "Pastel Dream"),
-    CardTheme(Color(0xFF000000), Color(0xFF434343), "Midnight Black")
-)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -72,6 +58,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // RECURRING STATES
     var recurringRules = mutableStateListOf<RecurringRule>()
 
+    // Sorted list for Dashboard "Upcoming" section
+    val upcomingRules by derivedStateOf {
+        recurringRules.sortedBy { it.nextRunDate }
+    }
+
+    // RECURRING EDIT STATE
+    var recurringRuleToEdit by mutableStateOf<RecurringRule?>(null)
+
+    fun clearRecurringEdit() {
+        recurringRuleToEdit = null
+    }
+
+    private var recurringCheckJob: Job? = null
+
     // Edit States
     var expenseToEdit by mutableStateOf<Expense?>(null)
     var walletToEdit by mutableStateOf<Wallet?>(null)
@@ -88,22 +88,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkInitialAuthState()
     }
 
+    // ============================================================================================
+    // REGION: INITIALIZATION & AUTH
+    // ============================================================================================
+
     private fun checkInitialAuthState() {
         val currentUser = auth.currentUser
         if (currentUser != null) {
             db.collection("users").document(currentUser.uid).get()
                 .addOnSuccessListener { doc ->
                     if (doc.exists() && doc.contains("name")) {
-                        fetchUserProfile()
-                        fetchWallets()
-                        fetchUserCategories()
-                        fetchRecurringRules()
-                        processRecurringRules()
-                        isLoggedIn = true
+                        loadUserData()
                     } else {
                         isLoggedIn = false
+                        isCheckingAuthState = false
                     }
-                    isCheckingAuthState = false
                 }
                 .addOnFailureListener {
                     isLoggedIn = false
@@ -115,24 +114,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- AUTHENTICATION ---
+    private fun loadUserData() {
+        fetchUserProfile()
+        fetchWallets()
+        fetchUserCategories()
+        fetchRecurringRules()
+        startRecurringCheckLoop()
+        isLoggedIn = true
+        isCheckingAuthState = false
+    }
+
     fun signInWithGoogle(idToken: String, onResult: (Boolean) -> Unit) {
         val credential = GoogleAuthProvider.getCredential(idToken, null)
         auth.signInWithCredential(credential)
-            .addOnSuccessListener { task ->
+            .addOnSuccessListener {
                 val uid = auth.currentUser?.uid
                 if (uid != null) {
                     db.collection("users").document(uid).get()
                         .addOnSuccessListener { doc ->
                             if (doc.exists() && doc.contains("name")) {
-                                fetchUserProfile()
-                                fetchWallets()
-                                fetchUserCategories()
-                                fetchRecurringRules()
-                                isLoggedIn = true
-                                onResult(false)
+                                loadUserData()
+                                onResult(false) // Not new user
                             } else {
-                                onResult(true)
+                                onResult(true) // New user
                             }
                         }
                         .addOnFailureListener { onResult(true) }
@@ -143,43 +147,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .addOnFailureListener { Log.e("Auth", "Google sign in failed", it) }
     }
 
-    // *** FIX HERE: REMOVED DEFAULT WALLET CREATION ***
     fun finalizeProfile(
         name: String, dob: String, gender: String, balance: Double, avatarIdx: Int,
         onSuccess: () -> Unit, onFailure: (String) -> Unit
     ) {
-        val uid = auth.currentUser?.uid
-        if (uid == null) {
-            onFailure("User not authenticated. Please sign in again.")
-            return
-        }
-
+        val uid = auth.currentUser?.uid ?: return
         val userMap = hashMapOf(
             "name" to name, "dob" to dob, "gender" to gender,
             "avatarIndex" to avatarIdx, "email" to auth.currentUser?.email
         )
 
-        // Only save user profile, NO default wallet created here
         db.collection("users").document(uid).set(userMap)
             .addOnSuccessListener {
-                fetchUserProfile()
-                fetchWallets()
-                fetchUserCategories()
-                isLoggedIn = true
+                loadUserData()
                 onSuccess()
             }
-            .addOnFailureListener { e ->
-                onFailure(e.message ?: "Registration failed")
-            }
+            .addOnFailureListener { e -> onFailure(e.message ?: "Registration failed") }
     }
 
     fun logout() {
-        Log.d("MainViewModel", "Performing Logout")
+        recurringCheckJob?.cancel()
         auth.signOut()
-
-        // Use viewModelScope to ensure state updates happen on the main thread
         viewModelScope.launch {
-            // CLEAR ALL LOCAL STATE
             wallets.clear()
             recurringRules.clear()
             categoryMap = emptyMap()
@@ -188,14 +177,44 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             userDob = ""
             userGender = ""
             selectedWalletId = null
-
-            // This triggers the UI navigation to Login Screen
             isLoggedIn = false
-            isCheckingAuthState = false // Ensure we aren't stuck in loading
+            isCheckingAuthState = false
         }
     }
 
-    // --- DATA FETCHING ---
+    fun deleteUserAccount(onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val user = auth.currentUser ?: return
+        val uid = user.uid
+        val userDocRef = db.collection("users").document(uid)
+
+        val collections = listOf("wallets", "transactions", "recurring_rules")
+        val fetchTasks = collections.map { userDocRef.collection(it).get() }
+
+        Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(fetchTasks)
+            .addOnSuccessListener { snapshots ->
+                val batch = db.batch()
+                snapshots.flatMap { it.documents }.forEach { batch.delete(it.reference) }
+                batch.delete(userDocRef)
+
+                batch.commit().addOnSuccessListener {
+                    user.delete().addOnSuccessListener {
+                        viewModelScope.launch {
+                            logout()
+                            onSuccess()
+                        }
+                    }.addOnFailureListener { e ->
+                        if (e is FirebaseAuthRecentLoginRequiredException) onError("Please Log Out and Log In again to delete account.")
+                        else onError(e.message ?: "Auth Error")
+                    }
+                }.addOnFailureListener { e -> onError("Data Delete Failed: ${e.message}") }
+            }
+            .addOnFailureListener { e -> onError("Failed to fetch data: ${e.message}") }
+    }
+
+    // ============================================================================================
+    // REGION: DATA FETCHING (User, Wallets, Recurring)
+    // ============================================================================================
+
     fun fetchUserProfile() {
         val uid = auth.currentUser?.uid ?: return
         db.collection("users").document(uid).get().addOnSuccessListener { doc ->
@@ -215,15 +234,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val list = snapshot.toObjects(Wallet::class.java)
                     wallets.clear()
                     wallets.addAll(list)
-                    // Auto-select first wallet only if none selected AND wallets exist
+                    // If no wallet is selected yet, default to "All" (null) or first wallet if you prefer
                     if (wallets.isNotEmpty() && selectedWalletId == null) {
-                        selectedWalletId = wallets.first().id
+                        // selectedWalletId = wallets.first().id // Optional: Default to first
                     }
                 }
             }
     }
 
-    // --- EXPENSE LOGIC ---
+    private fun fetchRecurringRules() {
+        val uid = auth.currentUser?.uid ?: return
+        db.collection("users").document(uid).collection("recurring_rules")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null) {
+                    recurringRules.clear()
+                    recurringRules.addAll(snapshot.toObjects(RecurringRule::class.java))
+                }
+            }
+    }
+
+    // ============================================================================================
+    // REGION: TRANSACTIONS & EXPENSES
+    // ============================================================================================
+
     private val _expensesFlow = callbackFlow {
         val user = auth.currentUser
         if (user == null) { trySend(emptyList()); awaitClose {}; return@callbackFlow }
@@ -243,35 +276,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         else list.filter { it.walletId == walletId || it.toWalletId == walletId }
             .map { expense ->
                 if (expense.type == "TRANSFER" && expense.toWalletId == walletId) {
-                    expense.copy(amount = abs(expense.amount))
+                    expense.copy(amount = abs(expense.amount)) // Incoming transfer is positive
                 } else {
                     expense
                 }
             }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val topExpenses = filteredExpenses.map { list ->
-        list.filter { it.type == "EXPENSE" }
-            .sortedByDescending { abs(it.amount) }
-            .take(3)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val dailySpending = filteredExpenses.map { list ->
-        list.filter { it.type == "EXPENSE" }
-            .groupBy {
-                val cal = Calendar.getInstance().apply { timeInMillis = it.date }
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                cal.timeInMillis
-            }
-            .mapValues { entry -> entry.value.sumOf { abs(it.amount) } }
-            .toSortedMap()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
-
-    val categorySpending = filteredExpenses.map { list ->
-        list.filter { it.type == "EXPENSE" }
+    // --- NEW: Current Month Spending (For Dashboard) ---
+    val currentMonthSpending = filteredExpenses.map { list ->
+        list.filter { it.type == "EXPENSE" && it.isCurrentMonth() }
             .groupBy { it.category.substringBefore(" -> ") }
             .mapValues { entry -> entry.value.sumOf { abs(it.amount) } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -286,11 +300,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .sumOf { abs(it.amount) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
-    // --- TRANSACTION OPERATIONS ---
     fun addTransaction(expense: Expense) {
         val uid = auth.currentUser?.uid ?: return
         val newRef = db.collection("users").document(uid).collection("transactions").document()
-
         val finalAmount = if (expense.type == "EXPENSE" || expense.type == "TRANSFER") -abs(expense.amount) else abs(expense.amount)
         val finalExpense = expense.copy(id = newRef.id, amount = finalAmount)
 
@@ -302,6 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         db.runTransaction { transaction ->
             val walletRef = db.collection("users").document(uid).collection("wallets").document(expense.walletId)
             val currentBal = transaction.get(walletRef).getDouble("balance") ?: 0.0
+
             var destRef: DocumentReference? = null
             var destBal = 0.0
 
@@ -311,10 +324,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             transaction.set(newRef, finalExpense)
-            transaction.update(walletRef, "balance", currentBal + finalAmount)
+            transaction.update(walletRef, "balance", currentBal + finalAmount) // Deduct from source
 
             if (destRef != null) {
-                transaction.update(destRef, "balance", destBal + abs(expense.amount))
+                transaction.update(destRef, "balance", destBal + abs(expense.amount)) // Add to dest
             }
         }
     }
@@ -322,34 +335,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateTransaction(oldExpense: Expense, newExpense: Expense) {
         val uid = auth.currentUser?.uid ?: return
         val docRef = db.collection("users").document(uid).collection("transactions").document(oldExpense.id)
-        val finalNewAmount = if (newExpense.type == "EXPENSE" || newExpense.type == "TRANSFER") -abs(newExpense.amount) else abs(newExpense.amount)
-        val finalNewExpense = newExpense.copy(amount = finalNewAmount)
 
         db.runTransaction { transaction ->
-            val walletsToRead = mutableSetOf(oldExpense.walletId, newExpense.walletId)
-            oldExpense.toWalletId?.let { walletsToRead.add(it) }
-            newExpense.toWalletId?.let { walletsToRead.add(it) }
-            val balances = mutableMapOf<String, Double>()
-            for (wId in walletsToRead.filter { it.isNotEmpty() }) {
-                balances[wId] = transaction.get(db.collection("users").document(uid).collection("wallets").document(wId)).getDouble("balance") ?: 0.0
+            // 1. Identify all wallets involved (Old Source/Dest and New Source/Dest)
+            val walletIds = mutableSetOf<String>()
+            walletIds.add(oldExpense.walletId)
+            if (oldExpense.type == "TRANSFER" && !oldExpense.toWalletId.isNullOrEmpty()) walletIds.add(oldExpense.toWalletId)
+            walletIds.add(newExpense.walletId)
+            if (newExpense.type == "TRANSFER" && !newExpense.toWalletId.isNullOrEmpty()) walletIds.add(newExpense.toWalletId)
+
+            // 2. Read all wallet snapshots first (Firestore requires reads before writes)
+            val walletSnapshots = walletIds.associateWith { id ->
+                transaction.get(db.collection("users").document(uid).collection("wallets").document(id))
             }
 
-            if (oldExpense.type == "EXPENSE") balances[oldExpense.walletId] = (balances[oldExpense.walletId] ?: 0.0) + abs(oldExpense.amount)
-            else if (oldExpense.type == "INCOME") balances[oldExpense.walletId] = (balances[oldExpense.walletId] ?: 0.0) - abs(oldExpense.amount)
-            else if (oldExpense.type == "TRANSFER" && oldExpense.toWalletId != null) {
-                balances[oldExpense.walletId] = (balances[oldExpense.walletId] ?: 0.0) + abs(oldExpense.amount)
-                balances[oldExpense.toWalletId] = (balances[oldExpense.toWalletId] ?: 0.0) - abs(oldExpense.amount)
+            // 3. Create a mutable map of current balances to track changes
+            val balances = walletSnapshots.mapValues { it.value.getDouble("balance") ?: 0.0 }.toMutableMap()
+
+            // 4. REVERT OLD Transaction (Undo previous effect)
+            val oldAmt = abs(oldExpense.amount)
+            when (oldExpense.type) {
+                "INCOME" -> balances[oldExpense.walletId] = balances[oldExpense.walletId]!! - oldAmt
+                "EXPENSE" -> balances[oldExpense.walletId] = balances[oldExpense.walletId]!! + oldAmt
+                "TRANSFER" -> {
+                    balances[oldExpense.walletId] = balances[oldExpense.walletId]!! + oldAmt // Refund Source
+                    if (!oldExpense.toWalletId.isNullOrEmpty() && balances.containsKey(oldExpense.toWalletId)) {
+                        balances[oldExpense.toWalletId] = balances[oldExpense.toWalletId]!! - oldAmt // Deduct from Dest
+                    }
+                }
             }
 
-            if (finalNewExpense.type == "EXPENSE") balances[finalNewExpense.walletId] = (balances[finalNewExpense.walletId] ?: 0.0) - abs(finalNewExpense.amount)
-            else if (finalNewExpense.type == "INCOME") balances[finalNewExpense.walletId] = (balances[finalNewExpense.walletId] ?: 0.0) + abs(finalNewExpense.amount)
-            else if (finalNewExpense.type == "TRANSFER" && finalNewExpense.toWalletId != null) {
-                balances[finalNewExpense.walletId] = (balances[finalNewExpense.walletId] ?: 0.0) - abs(finalNewExpense.amount)
-                balances[finalNewExpense.toWalletId] = (balances[finalNewExpense.toWalletId] ?: 0.0) + abs(finalNewExpense.amount)
+            // 5. APPLY NEW Transaction (Apply new effect)
+            val newAmt = abs(newExpense.amount)
+            when (newExpense.type) {
+                "INCOME" -> balances[newExpense.walletId] = balances[newExpense.walletId]!! + newAmt
+                "EXPENSE" -> balances[newExpense.walletId] = balances[newExpense.walletId]!! - newAmt
+                "TRANSFER" -> {
+                    balances[newExpense.walletId] = balances[newExpense.walletId]!! - newAmt // Deduct Source
+                    if (!newExpense.toWalletId.isNullOrEmpty() && balances.containsKey(newExpense.toWalletId)) {
+                        balances[newExpense.toWalletId] = balances[newExpense.toWalletId]!! + newAmt // Add to Dest
+                    }
+                }
             }
 
-            transaction.set(docRef, finalNewExpense)
-            for ((wId, bal) in balances) transaction.update(db.collection("users").document(uid).collection("wallets").document(wId), "balance", bal)
+            // 6. Write Updates
+            // Save Transaction
+            val finalStoredAmount = if (newExpense.type == "INCOME") newAmt else -newAmt
+            transaction.set(docRef, newExpense.copy(amount = finalStoredAmount))
+
+            // Update Wallets
+            balances.forEach { (id, newBal) ->
+                val ref = db.collection("users").document(uid).collection("wallets").document(id)
+                transaction.update(ref, "balance", newBal)
+            }
         }
     }
 
@@ -358,29 +396,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val docRef = db.collection("users").document(uid).collection("transactions").document(expense.id)
 
         db.runTransaction { transaction ->
+            // 1. Get Source Wallet
             val walletRef = db.collection("users").document(uid).collection("wallets").document(expense.walletId)
-            val currentBal = transaction.get(walletRef).getDouble("balance") ?: 0.0
-            var destRef: DocumentReference? = null
-            var destBal = 0.0
-            if (expense.type == "TRANSFER" && expense.toWalletId != null) {
-                destRef = db.collection("users").document(uid).collection("wallets").document(expense.toWalletId)
-                destBal = transaction.get(destRef).getDouble("balance") ?: 0.0
+            val walletSnapshot = transaction.get(walletRef)
+            val currentBal = walletSnapshot.getDouble("balance") ?: 0.0
+
+            // 2. Handle Transfer Destination Wallet
+            if (expense.type == "TRANSFER" && !expense.toWalletId.isNullOrEmpty()) {
+                val destRef = db.collection("users").document(uid).collection("wallets").document(expense.toWalletId)
+                val destSnapshot = transaction.get(destRef)
+
+                // Only try to update destination if it still exists
+                if (destSnapshot.exists()) {
+                    val destBal = destSnapshot.getDouble("balance") ?: 0.0
+                    transaction.update(destRef, "balance", destBal - abs(expense.amount)) // Remove the money that was added
+                }
             }
 
+            // 3. Delete Transaction and Refund/Adjust Source
             transaction.delete(docRef)
 
-            if (expense.type == "TRANSFER" && destRef != null) {
-                transaction.update(walletRef, "balance", currentBal + abs(expense.amount))
-                transaction.update(destRef, "balance", destBal - abs(expense.amount))
-            } else if (expense.type == "EXPENSE") {
-                transaction.update(walletRef, "balance", currentBal + abs(expense.amount))
+            if (expense.type == "INCOME") {
+                transaction.update(walletRef, "balance", currentBal - abs(expense.amount)) // Remove Income
             } else {
-                transaction.update(walletRef, "balance", currentBal - abs(expense.amount))
+                // For EXPENSE and TRANSFER (Source), we add the money back
+                transaction.update(walletRef, "balance", currentBal + abs(expense.amount))
             }
         }
     }
+    // ============================================================================================
+    // REGION: WALLET CRUD & CASCADE DELETE
+    // ============================================================================================
 
-    // --- WALLET CRUD ---
     fun addOrUpdateWallet(wallet: Wallet, onSuccess: () -> Unit) {
         val uid = auth.currentUser?.uid ?: return
         val walletId = if (wallet.id.isEmpty()) UUID.randomUUID().toString() else wallet.id
@@ -389,85 +436,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteWallet(walletId: String, onSuccess: () -> Unit) {
         val uid = auth.currentUser?.uid ?: return
-        db.collection("users").document(uid).collection("transactions").whereEqualTo("walletId", walletId).get().addOnSuccessListener { s1 ->
-            db.collection("users").document(uid).collection("transactions").whereEqualTo("toWalletId", walletId).get().addOnSuccessListener { s2 ->
+        val walletRef = db.collection("users").document(uid).collection("wallets").document(walletId)
+
+        // Find all recurring rules linked to this wallet
+        db.collection("users").document(uid).collection("recurring_rules")
+            .whereEqualTo("walletId", walletId)
+            .get()
+            .addOnSuccessListener { snapshot ->
                 val batch = db.batch()
-                s1.documents.forEach { batch.delete(it.reference) }
-                s2.documents.forEach { batch.delete(it.reference) }
-                batch.delete(db.collection("users").document(uid).collection("wallets").document(walletId))
-                batch.commit().addOnSuccessListener { if(selectedWalletId == walletId) selectedWalletId = null; onSuccess() }
-            }
-        }
-    }
 
-    // --- RECURRING & ACCOUNT DELETION ---
-    fun deleteUserAccount(onSuccess: () -> Unit, onError: (String) -> Unit) {
-        val user = auth.currentUser ?: return
-        val uid = user.uid
-        val userDocRef = db.collection("users").document(uid)
+                // 1. Delete the wallet
+                batch.delete(walletRef)
 
-        Log.d("DeleteAccount", "Starting deletion for user: $uid")
-
-        val collections = listOf("wallets", "transactions", "recurring_rules")
-        val fetchTasks = collections.map { userDocRef.collection(it).get() }
-
-        Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(fetchTasks)
-            .addOnSuccessListener { snapshots ->
-                val batch = db.batch()
-                val allDocs = snapshots.flatMap { it.documents }
-
-                Log.d("DeleteAccount", "Found ${allDocs.size} documents to delete.")
-
-                for (doc in allDocs) {
+                // 2. Cascade Delete: Remove all linked recurring rules
+                for (doc in snapshot.documents) {
                     batch.delete(doc.reference)
                 }
 
-                batch.delete(userDocRef)
-
                 batch.commit().addOnSuccessListener {
-                    Log.d("DeleteAccount", "Batch delete successful. Deleting Auth User.")
-                    user.delete()
-                        .addOnSuccessListener {
-                            Log.d("DeleteAccount", "Auth User deleted. Logging out.")
-
-                            // Important: Run logout on main thread to trigger UI changes
-                            viewModelScope.launch {
-                                logout()
-                                onSuccess()
-                            }
-                        }
-                        .addOnFailureListener { e ->
-                            if (e is FirebaseAuthRecentLoginRequiredException) {
-                                onError("Security: Please Log Out and Log In again to delete your account.")
-                            } else {
-                                onError("Auth Error: ${e.message}")
-                            }
-                        }
+                    if(selectedWalletId == walletId) selectedWalletId = null
+                    onSuccess()
                 }.addOnFailureListener { e ->
-                    onError("Data Delete Failed: ${e.message}")
+                    Log.e("WalletDelete", "Failed to cascade delete: ${e.message}")
                 }
             }
             .addOnFailureListener { e ->
-                onError("Failed to fetch data: ${e.message}")
+                // If fetch fails, try deleting just the wallet
+                walletRef.delete().addOnSuccessListener { onSuccess() }
             }
     }
 
-    // --- RECURRING RULES ---
-    private fun fetchRecurringRules() {
-        val uid = auth.currentUser?.uid ?: return
-        db.collection("users").document(uid).collection("recurring_rules")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null) {
-                    recurringRules.clear()
-                    recurringRules.addAll(snapshot.toObjects(RecurringRule::class.java))
-                }
-            }
+    // ============================================================================================
+    // REGION: RECURRING LOGIC (FIXED)
+    // ============================================================================================
+
+    fun refreshRecurring() {
+        processRecurringRules()
     }
 
     fun addRecurringRule(rule: RecurringRule) {
         val uid = auth.currentUser?.uid ?: return
         val id = if (rule.id.isEmpty()) UUID.randomUUID().toString() else rule.id
-        db.collection("users").document(uid).collection("recurring_rules").document(id).set(rule.copy(id = id))
+        val finalRule = rule.copy(id = id)
+        db.collection("users").document(uid).collection("recurring_rules").document(id).set(finalRule)
+
+        if (finalRule.nextRunDate <= System.currentTimeMillis()) {
+            processRecurringRules()
+        }
     }
 
     fun deleteRecurringRule(ruleId: String) {
@@ -475,63 +490,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         db.collection("users").document(uid).collection("recurring_rules").document(ruleId).delete()
     }
 
+    private fun startRecurringCheckLoop() {
+        recurringCheckJob?.cancel()
+        recurringCheckJob = viewModelScope.launch {
+            while (isActive && isLoggedIn) {
+                processRecurringRules()
+                delay(60 * 1000) // Check every minute
+            }
+        }
+    }
+
     private fun processRecurringRules() {
         val uid = auth.currentUser?.uid ?: return
-        val today = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
 
-        db.collection("users").document(uid).collection("recurring_rules")
-            .whereLessThanOrEqualTo("nextRunDate", today)
-            .get()
-            .addOnSuccessListener { snapshot ->
-                for (doc in snapshot.documents) {
-                    val rule = doc.toObject(RecurringRule::class.java) ?: continue
+        db.collection("users").document(uid).collection("recurring_rules").get().addOnSuccessListener { snapshot ->
+            for (doc in snapshot.documents) {
+                val rule = doc.toObject(RecurringRule::class.java) ?: continue
 
-                    val tx = Expense(
-                        amount = rule.amount,
-                        title = "Auto: ${rule.title}",
-                        category = rule.category,
-                        type = rule.type,
-                        date = rule.nextRunDate,
-                        walletId = rule.walletId
-                    )
-                    addTransaction(tx)
+                if (rule.nextRunDate <= now) {
+                    db.runTransaction { transaction ->
+                        val walletRef = db.collection("users").document(uid).collection("wallets").document(rule.walletId)
+                        val ruleRef = db.collection("users").document(uid).collection("recurring_rules").document(rule.id)
+                        val newTxRef = db.collection("users").document(uid).collection("transactions").document()
 
-                    val nextDate = calculateNextDate(rule.nextRunDate, rule.frequency)
-                    doc.reference.update("nextRunDate", nextDate)
+                        val walletSnapshot = transaction.get(walletRef)
+
+                        // SAFETY CHECK: Ensure wallet still exists before charging
+                        if (walletSnapshot.exists()) {
+                            val currentBalance = walletSnapshot.getDouble("balance") ?: 0.0
+                            val amount = abs(rule.amount)
+
+                            val tx = Expense(
+                                id = newTxRef.id,
+                                amount = if (rule.type == "INCOME") amount else -amount,
+                                title = "Auto: ${rule.title}",
+                                category = rule.category,
+                                type = rule.type,
+                                date = rule.nextRunDate,
+                                walletId = rule.walletId
+                            )
+
+                            var nextDate = calculateNextDate(rule.nextRunDate, rule.frequency)
+                            while (nextDate <= now) {
+                                nextDate = calculateNextDate(nextDate, rule.frequency)
+                            }
+
+                            transaction.set(newTxRef, tx)
+                            transaction.update(walletRef, "balance", if (rule.type == "INCOME") currentBalance + amount else currentBalance - amount)
+                            transaction.update(ruleRef, "nextRunDate", nextDate)
+                        } else {
+                            // If wallet missing, maybe delete the rule? For now, we just skip.
+                            Log.w("Recurring", "Skipping rule ${rule.title} because wallet ${rule.walletId} was deleted.")
+                        }
+                    }
                 }
             }
+        }
     }
 
     private fun calculateNextDate(current: Long, freq: String): Long {
-        val cal = Calendar.getInstance().apply { timeInMillis = current }
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = current
+        val cleanFreq = freq.lowercase().trim()
 
-        if (freq.startsWith("Every")) {
-            try {
-                val parts = freq.split(" ")
-                val count = parts[1].toIntOrNull() ?: 1
-                val unit = parts[2]
-                when (unit) {
-                    "Days", "Day" -> cal.add(Calendar.DAY_OF_YEAR, count)
-                    "Weeks", "Week" -> cal.add(Calendar.WEEK_OF_YEAR, count)
-                    "Months", "Month" -> cal.add(Calendar.MONTH, count)
-                    "Years", "Year" -> cal.add(Calendar.YEAR, count)
-                }
-            } catch (e: Exception) {
-                cal.add(Calendar.MONTH, 1)
-            }
-        } else {
-            when(freq) {
-                "Daily" -> cal.add(Calendar.DAY_OF_YEAR, 1)
-                "Weekly" -> cal.add(Calendar.WEEK_OF_YEAR, 1)
-                "Monthly" -> cal.add(Calendar.MONTH, 1)
-                "Yearly" -> cal.add(Calendar.YEAR, 1)
-                else -> cal.add(Calendar.MONTH, 1)
-            }
+        val numberRegex = "\\d+".toRegex()
+        val match = numberRegex.find(cleanFreq)
+        val count = match?.value?.toIntOrNull() ?: 1
+
+        when {
+            "day" in cleanFreq || "daily" in cleanFreq -> cal.add(Calendar.DAY_OF_YEAR, count)
+            "week" in cleanFreq || "weekly" in cleanFreq -> cal.add(Calendar.WEEK_OF_YEAR, count)
+            "month" in cleanFreq || "monthly" in cleanFreq -> cal.add(Calendar.MONTH, count)
+            "year" in cleanFreq || "yearly" in cleanFreq -> cal.add(Calendar.YEAR, count)
+            else -> cal.add(Calendar.MONTH, 1)
         }
+
         return cal.timeInMillis
     }
 
-    // --- CATEGORY LOGIC ---
+    // ============================================================================================
+    // REGION: CATEGORIES & HELPERS
+    // ============================================================================================
+
     private fun fetchUserCategories() {
         if (categoryMap.isEmpty()) {
             categoryMap = mapOf(
@@ -544,7 +585,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "Communication" to listOf("Phone Bill", "Internet", "Software", "Postal"),
                 "Finance" to listOf("Taxes", "Fees", "Fines", "Insurance", "Loan", "Investment"),
                 "Investments" to listOf("Stocks", "Crypto", "Real Estate", "Savings", "Bonds"),
-                "Income" to listOf("Salary", "Bonus", "Gifts", "Refunds", "Dividends", "Rental")
+                "Income" to listOf("Salary", "Bonus", "Commission", "Interest", "Dividends", "Rental Income", "Freelance", "Side Hustle", "Gifts", "Refunds", "Grants", "Sale of Items")
             )
         }
     }
@@ -552,120 +593,78 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun getIconForCategory(name: String): ImageVector {
         return when (name) {
             "Food & Drinks" -> Icons.Default.Restaurant
+            "Shopping" -> Icons.Default.ShoppingBag
+            "Housing" -> Icons.Default.Home
+            "Transportation" -> Icons.Default.DirectionsBus
+            "Vehicle" -> Icons.Default.DirectionsCar
+            "Entertainment" -> Icons.Default.Movie
+            "Communication" -> Icons.Default.Phone
+            "Finance" -> Icons.Default.AccountBalanceWallet
+            "Investments" -> Icons.Default.TrendingUp
+            "Income" -> Icons.Default.AttachMoney
             "Groceries" -> Icons.Default.ShoppingCart
             "Restaurants" -> Icons.Default.RestaurantMenu
             "Fast Food" -> Icons.Default.Fastfood
             "Coffee" -> Icons.Default.LocalCafe
             "Bars" -> Icons.Default.LocalBar
             "Delivery" -> Icons.Default.DeliveryDining
-            "Shopping" -> Icons.Default.ShoppingBag
             "Clothing" -> Icons.Default.Checkroom
             "Electronics" -> Icons.Default.Devices
-            "Home & Garden" -> Icons.Default.Chair
+            "Home & Garden" -> Icons.Default.Yard
             "Health & Beauty" -> Icons.Default.Spa
             "Gifts" -> Icons.Default.CardGiftcard
-            "Kids" -> Icons.Default.ChildCare
-            "Housing" -> Icons.Default.Home
+            "Kids" -> Icons.Default.ChildFriendly
             "Rent" -> Icons.Default.House
-            "Mortgage" -> Icons.Default.AccountBalance
+            "Mortgage" -> Icons.Default.Key
             "Utilities" -> Icons.Default.Lightbulb
             "Maintenance" -> Icons.Default.Build
             "Services" -> Icons.Default.CleaningServices
             "Insurance" -> Icons.Default.Security
-            "Transportation" -> Icons.Default.DirectionsBus
-            "Public Transport" -> Icons.Default.DirectionsBus
+            "Public Transport" -> Icons.Default.Train
             "Taxi" -> Icons.Default.LocalTaxi
             "Flight" -> Icons.Default.Flight
             "Train" -> Icons.Default.Train
             "Fuel" -> Icons.Default.LocalGasStation
             "Parking" -> Icons.Default.LocalParking
-            "Vehicle" -> Icons.Default.DirectionsCar
             "Repairs" -> Icons.Default.CarRepair
             "Wash" -> Icons.Default.LocalCarWash
-            "Entertainment" -> Icons.Default.Movie
             "Movies" -> Icons.Default.Theaters
-            "Games" -> Icons.Default.SportsEsports
+            "Games" -> Icons.Default.Gamepad
             "Sports" -> Icons.Default.SportsSoccer
             "Events" -> Icons.Default.Event
             "Streaming" -> Icons.Default.Tv
             "Music" -> Icons.Default.MusicNote
-            "Communication" -> Icons.Default.Phone
-            "Phone Bill" -> Icons.Default.Smartphone
+            "Phone Bill" -> Icons.Default.PhoneAndroid
             "Internet" -> Icons.Default.Wifi
             "Software" -> Icons.Default.Code
-            "Postal" -> Icons.Default.LocalPostOffice
-            "Finance" -> Icons.Default.AccountBalanceWallet
+            "Postal" -> Icons.Default.Markunread
             "Taxes" -> Icons.Default.RequestQuote
             "Fees" -> Icons.Default.Payments
             "Fines" -> Icons.Default.Gavel
             "Loan" -> Icons.Default.CreditScore
-            "Investments" -> Icons.Default.TrendingUp
-            "Stocks" -> Icons.Default.ShowChart
-            "Crypto" -> Icons.Default.CurrencyExchange
-            "Real Estate" -> Icons.Default.Domain
+            "Investment" -> Icons.Default.ShowChart
+            "Stocks" -> Icons.Default.Timeline
+            "Crypto" -> Icons.Default.CurrencyBitcoin
+            "Real Estate" -> Icons.Default.Apartment
             "Savings" -> Icons.Default.Savings
-            "Bonds" -> Icons.Default.ReceiptLong
-            "Income" -> Icons.Default.AttachMoney
+            "Bonds" -> Icons.Default.Description
             "Salary" -> Icons.Default.Work
             "Bonus" -> Icons.Default.Stars
-            "Refunds" -> Icons.Default.Undo
+            "Commission" -> Icons.Default.Percent
+            "Interest" -> Icons.Default.AccountBalance
             "Dividends" -> Icons.Default.PieChart
-            "Rental" -> Icons.Default.Key
-            "Salary" -> Icons.Default.Work
-            "Business" -> Icons.Default.BusinessCenter
-            "Gift" -> Icons.Default.CardGiftcard
+            "Rental Income" -> Icons.Default.Domain
+            "Freelance" -> Icons.Default.LaptopMac
+            "Side Hustle" -> Icons.Default.Bolt
+            "Refunds" -> Icons.Default.Undo
+            "Grants" -> Icons.Default.School
+            "Sale of Items" -> Icons.Default.Sell
             else -> Icons.Default.Category
         }
     }
 
     fun getCategoriesForType(isExpense: Boolean): Map<String, List<String>> {
-        return if (isExpense) {
-            categoryMap.filterKeys { it != "Income" }
-        } else {
-            categoryMap.filterKeys { it == "Income" }
-        }
-    }
-
-    fun saveCustomCategory(main: String, sub: String, iconName: String) {
-        val newMap = categoryMap.toMutableMap()
-        if (newMap.containsKey(main)) {
-            val subs = newMap[main]?.toMutableList() ?: mutableListOf()
-            if (!subs.contains(sub)) subs.add(sub)
-            newMap[main] = subs
-        } else {
-            newMap[main] = listOf(sub)
-        }
-        categoryMap = newMap
-    }
-
-    fun isDefaultCategory(name: String): Boolean = false
-
-    fun renameCustomCategory(old: String, new: String, isMain: Boolean, parent: String?, icon: String) {
-        val newMap = categoryMap.toMutableMap()
-        if (isMain) {
-            val subs = newMap.remove(old) ?: emptyList()
-            newMap[new] = subs
-        } else if (parent != null) {
-            val subs = newMap[parent]?.toMutableList() ?: mutableListOf()
-            val index = subs.indexOf(old)
-            if (index != -1) {
-                subs[index] = new
-                newMap[parent] = subs
-            }
-        }
-        categoryMap = newMap
-    }
-
-    fun deleteCustomCategory(main: String, sub: String?) {
-        val newMap = categoryMap.toMutableMap()
-        if (sub == null) {
-            newMap.remove(main)
-        } else {
-            val subs = newMap[main]?.toMutableList() ?: mutableListOf()
-            subs.remove(sub)
-            newMap[main] = subs
-        }
-        categoryMap = newMap
+        return if (isExpense) categoryMap.filterKeys { it != "Income" } else categoryMap.filterKeys { it == "Income" }
     }
 
     fun updateBiometric(enabled: Boolean) { isBiometricEnabled = enabled; prefs.edit().putBoolean("biometric_enabled", enabled).apply() }

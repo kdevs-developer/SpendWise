@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kdev.spendwise.ui.MainViewModel
+import com.kdev.spendwise.ui.components.PremiumAlertDialog
 import com.kdev.spendwise.util.BiometricUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,7 +46,16 @@ fun ProfileScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Profile", fontWeight = FontWeight.Bold) },
+                title = {
+                    Column {
+                        Text("Profile", fontWeight = FontWeight.Bold)
+                        Text(
+                            "Manage personal info & settings",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -58,7 +69,8 @@ fun ProfileScreen(
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
             )
         }
     ) { padding ->
@@ -66,16 +78,17 @@ fun ProfileScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp) // Reduced horizontal padding
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp), // Tighter spacing
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
 
             // --- 1. PROFILE HEADER ---
-            Spacer(Modifier.height(10.dp))
+            // Reduced spacer and image size to fit better
+            Spacer(Modifier.height(4.dp))
             Surface(
-                modifier = Modifier.size(110.dp),
+                modifier = Modifier.size(100.dp), // Reduced from 110dp
                 shape = CircleShape,
                 shadowElevation = 8.dp,
                 color = MaterialTheme.colorScheme.surface
@@ -100,44 +113,34 @@ fun ProfileScreen(
                     color = Color.Gray
                 )
             }
-            Spacer(Modifier.height(10.dp))
+
+            Spacer(Modifier.height(4.dp))
 
             // --- 2. PERSONAL DETAILS ---
-            Text(
-                "Personal Info",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.Start)
-            )
-
+            // Removed the separate "Personal Info" label to save space, the card implies it.
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Personal Details", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom=12.dp))
                     ProfileDetailRow(icon = Icons.Default.Cake, label = "Birthday", value = viewModel.userDob)
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp).alpha(0.5f))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp).alpha(0.1f))
                     ProfileDetailRow(icon = Icons.Default.PersonOutline, label = "Gender", value = viewModel.userGender)
                 }
             }
 
             // --- 3. SETTINGS ---
-            Text(
-                "Settings",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.Start)
-            )
-
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 shape = RoundedCornerShape(20.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text("App Settings", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top=8.dp, bottom=8.dp))
 
                     // DARK MODE TOGGLE
                     Row(
@@ -148,24 +151,25 @@ fun ProfileScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(36.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                                    .background(MaterialTheme.colorScheme.secondaryContainer.copy(0.5f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.DarkMode, null, tint = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.DarkMode, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             }
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(12.dp))
                             Text("Dark Mode", fontWeight = FontWeight.Medium)
                         }
                         Switch(
                             checked = viewModel.isDarkMode,
-                            onCheckedChange = { viewModel.toggleTheme(it) }
+                            onCheckedChange = { viewModel.toggleTheme(it) },
+                            modifier = Modifier.scale(0.8f) // Slightly smaller switch
                         )
                     }
 
                     if (isBiometricHardwareAvailable) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp).alpha(0.5f))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp).alpha(0.1f))
 
                         // BIOMETRIC TOGGLE
                         Row(
@@ -176,36 +180,38 @@ fun ProfileScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(40.dp)
+                                        .size(36.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(0.5f)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.Fingerprint, null, tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Default.Fingerprint, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                                 }
-                                Spacer(Modifier.width(16.dp))
+                                Spacer(Modifier.width(12.dp))
                                 Column {
                                     Text("Biometric Security", fontWeight = FontWeight.Medium)
-                                    Text("Unlock with fingerprint", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                    Text("Unlock with fingerprint", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                                 }
                             }
                             Switch(
                                 checked = viewModel.isBiometricEnabled,
-                                onCheckedChange = { viewModel.updateBiometric(it) }
+                                onCheckedChange = { viewModel.updateBiometric(it) },
+                                modifier = Modifier.scale(0.8f)
                             )
                         }
                     }
                 }
             }
 
-            // --- 4. LOG OUT ---
+            // --- 4. LOG OUT (Pushed to bottom) ---
             Spacer(Modifier.weight(1f))
 
             Button(
                 onClick = { viewModel.logout() },
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                elevation = ButtonDefaults.buttonElevation(0.dp)
             ) {
                 Icon(Icons.Default.Logout, null, tint = MaterialTheme.colorScheme.error)
                 Spacer(Modifier.width(8.dp))
@@ -217,63 +223,36 @@ fun ProfileScreen(
                 )
             }
 
-            Spacer(Modifier.height(40.dp))
+            // Bottom padding to ensure it doesn't touch the navigation bar
+            Spacer(Modifier.height(24.dp))
         }
 
         if (showDeleteDialog) {
-            AlertDialog(
-                onDismissRequest = { showDeleteDialog = false },
-                icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
-                title = { Text("Delete Account?", fontWeight = FontWeight.Bold) },
-                text = {
-                    Text(
-                        "This action is irreversible. All your transaction data and settings will be permanently erased.",
-                        textAlign = TextAlign.Center
+            PremiumAlertDialog(
+                title = "Delete Account?",
+                message = "This action is irreversible. All your transaction data and settings will be permanently erased.",
+                confirmText = "Delete",
+                dismissText = "Cancel",
+                icon = Icons.Default.Warning,
+                confirmButtonColor = MaterialTheme.colorScheme.error, // Red for high danger
+                iconColor = MaterialTheme.colorScheme.error,
+                onConfirm = {
+                    showDeleteDialog = false
+                    viewModel.deleteUserAccount(
+                        onSuccess = { /* Handled by Auth State Observer in Main */ },
+                        onError = { errorMsg ->
+                            Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
+                        }
                     )
                 },
-                confirmButton = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Button(
-                            onClick = { showDeleteDialog = false },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Cancel", fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = {
-                                showDeleteDialog = false
-                                // FIX: Passed both onSuccess and onError callbacks
-                                viewModel.deleteUserAccount(
-                                    onSuccess = {
-                                        // Handled by MainActivity observing isLoggedIn
-                                    },
-                                    onError = { errorMsg ->
-                                        Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
-                                    }
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Delete", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                },
-                dismissButton = null,
-                containerColor = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(24.dp)
+                onDismiss = { showDeleteDialog = false }
             )
         }
     }
 }
+
+// Helper extension to scale switches slightly if needed
+fun Modifier.scale(scale: Float) = this.then(Modifier.graphicsLayer(scaleX = scale, scaleY = scale))
 
 @Composable
 fun ProfileDetailRow(icon: ImageVector, label: String, value: String) {
@@ -282,7 +261,7 @@ fun ProfileDetailRow(icon: ImageVector, label: String, value: String) {
             modifier = Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.secondaryContainer),
+                .background(MaterialTheme.colorScheme.secondaryContainer.copy(0.5f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
