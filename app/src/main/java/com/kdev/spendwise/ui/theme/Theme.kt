@@ -16,39 +16,78 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
+// ============================================================================
+// PREMIUM FINTECH COLOR PALETTE
+// ============================================================================
+
+// --- Light Theme Colors ---
+private val PremiumLightPrimary = Color(0xFF0F172A) // Deep, authoritative Slate/Navy
+private val PremiumLightOnPrimary = Color.White
+private val PremiumLightPrimaryContainer = Color(0xFFE2E8F0)
+private val PremiumLightOnPrimaryContainer = Color(0xFF0F172A)
+private val PremiumLightSecondary = Color(0xFF2563EB) // Vibrant Royal Blue Accent
+private val PremiumLightBackground = Color(0xFFF8FAFC) // Crisp, cool off-white for depth
+private val PremiumLightSurface = Color(0xFFFFFFFF) // Pure white cards
+private val PremiumLightSurfaceVariant = Color(0xFFF1F5F9) // Subtle card backgrounds
+private val PremiumLightOnBackground = Color(0xFF0F172A) // High contrast text
+private val PremiumLightOutline = Color(0xFFE2E8F0) // Soft borders
+private val PremiumLightError = Color(0xFFEF4444) // Crisp Red for expenses/errors
+
+// --- Dark Theme Colors ---
+private val PremiumDarkPrimary = Color(0xFF38BDF8) // Bright, glowing blue for dark mode readability
+private val PremiumDarkOnPrimary = Color(0xFF022C22)
+private val PremiumDarkPrimaryContainer = Color(0xFF1E293B)
+private val PremiumDarkOnPrimaryContainer = Color(0xFFE0E7FF)
+private val PremiumDarkSecondary = Color(0xFF818CF8) // Soft Indigo Accent
+private val PremiumDarkBackground = Color(0xFF0B0F19) // Ultra-deep premium dark (OLED friendly)
+private val PremiumDarkSurface = Color(0xFF131B2F) // Slightly elevated for floating cards
+private val PremiumDarkSurfaceVariant = Color(0xFF1E293B)
+private val PremiumDarkOnBackground = Color(0xFFF8FAFC) // Crisp white text
+private val PremiumDarkOutline = Color(0xFF334155) // Visible but subtle dark borders
+private val PremiumDarkError = Color(0xFFF87171) // Soft red for dark mode
+
+// ============================================================================
+// COLOR SCHEMES
+// ============================================================================
+
 private val LightColorScheme = lightColorScheme(
-    primary = BlueGreyMain,
-    onPrimary = Color.White,
-    primaryContainer = BlueGreyLight,
-    onPrimaryContainer = BlueGreyMain,
-    secondary = BlueGreyMain,
+    primary = PremiumLightPrimary,
+    onPrimary = PremiumLightOnPrimary,
+    primaryContainer = PremiumLightPrimaryContainer,
+    onPrimaryContainer = PremiumLightOnPrimaryContainer,
+    secondary = PremiumLightSecondary,
     onSecondary = Color.White,
-    secondaryContainer = BlueGreyLight,
-    background = SurfaceLight,
-    surface = Color.White,
-    onBackground = TextPrimaryLight,
-    onSurface = TextPrimaryLight,
-    error = RedExpense
+    background = PremiumLightBackground,
+    surface = PremiumLightSurface,
+    surfaceVariant = PremiumLightSurfaceVariant,
+    onBackground = PremiumLightOnBackground,
+    onSurface = PremiumLightOnBackground,
+    outline = PremiumLightOutline,
+    error = PremiumLightError,
+    surfaceTint = Color.Transparent // PREVENTS MUDDY MATERIAL 3 TINTING
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = BlueGreyLight,
-    onPrimary = BlueGreyMain,
-    primaryContainer = Color(0xFF374379),
-    onPrimaryContainer = Color.White,
-    secondary = BlueGreyLight,
-    onSecondary = BlueGreyMain,
-    background = BlueGreyDark,
-    surface = Color(0xFF263238),
-    onBackground = Color.White,
-    onSurface = Color.White,
-    error = Color(0xFFEF9A9A)
+    primary = PremiumDarkPrimary,
+    onPrimary = PremiumDarkOnPrimary,
+    primaryContainer = PremiumDarkPrimaryContainer,
+    onPrimaryContainer = PremiumDarkOnPrimaryContainer,
+    secondary = PremiumDarkSecondary,
+    onSecondary = Color.Black,
+    background = PremiumDarkBackground,
+    surface = PremiumDarkSurface,
+    surfaceVariant = PremiumDarkSurfaceVariant,
+    onBackground = PremiumDarkOnBackground,
+    onSurface = PremiumDarkOnBackground,
+    outline = PremiumDarkOutline,
+    error = PremiumDarkError,
+    surfaceTint = Color.Transparent // PREVENTS MUDDY MATERIAL 3 TINTING
 )
 
 @Composable
 fun SpendWiseTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // set to TRUE if you want Android 12+ Wallpaper colors, FALSE to enforce your BlueGrey brand
+    // Set to TRUE if you want Android 12+ Wallpaper colors, FALSE to enforce your Premium brand
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
@@ -82,7 +121,7 @@ fun SpendWiseTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        // typography = Typography, // Ensure you have this file if uncommented
+        // typography = Typography, // Ensure you have your typography file set up here if needed
         content = content
     )
 }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kdev.spendwise.data.Wallet
+import com.kdev.spendwise.data.WalletType
 import com.kdev.spendwise.ui.MainViewModel
 import com.kdev.spendwise.data.cardThemes
 import com.kdev.spendwise.ui.components.PremiumAlertDialog
@@ -49,12 +51,10 @@ fun EditCardScreen(
     // Form States
     var bankName by remember { mutableStateOf(editingWallet?.bankName ?: "") }
 
-    // Default to "Savings" if new, or use existing name
-    var walletType by remember { mutableStateOf(editingWallet?.name ?: "Savings") }
+    // Use WalletType directly to ensure icon consistency across the app
+    var walletType by remember { mutableStateOf(editingWallet?.type ?: WalletType.SAVINGS) }
 
-    // --- FIX: Using 'cardNumber' to match your Wallet Data Class ---
     var cardNumber by remember { mutableStateOf(editingWallet?.cardNumber ?: "") }
-
     var balance by remember { mutableStateOf(editingWallet?.balance?.toString() ?: "") }
     var selectedThemeIndex by remember { mutableIntStateOf(editingWallet?.cardThemeId ?: 0) }
 
@@ -136,9 +136,10 @@ fun EditCardScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             // Display selected Wallet Type as card label
-                            Text(walletType, color = Color.White.copy(0.7f), fontSize = 12.sp)
+                            Text(walletType.getDisplayName(), color = Color.White.copy(0.7f), fontSize = 12.sp)
                         }
-                        Icon(Icons.Default.Nfc, contentDescription = null, tint = Color.White.copy(0.8f), modifier = Modifier.size(32.dp))
+                        // Replaced NFC with the dynamic account type icon for a more premium personalized look
+                        Icon(walletType.getIcon(), contentDescription = null, tint = Color.White.copy(0.8f), modifier = Modifier.size(32.dp))
                     }
 
                     Column {
@@ -162,7 +163,6 @@ fun EditCardScreen(
                             fontWeight = FontWeight.Medium,
                             fontSize = 14.sp
                         )
-                        // --- PREVIEW: Shows what you type instantly ---
                         val displayNum = if (cardNumber.isNotEmpty()) cardNumber.takeLast(4).padEnd(4, ' ') else "1234"
                         Text(
                             text = "**** **** **** $displayNum",
@@ -202,13 +202,14 @@ fun EditCardScreen(
 
             // --- 3. INPUT FIELDS ---
 
-            // Wallet Type Dropdown
+            // Dynamic Wallet Type Dropdown
             PremiumDropdown(
-                options = listOf("Savings", "Current", "Cash", "Credit Card", "Salary", "Investment"),
+                options = WalletType.values().toList(),
                 selectedOption = walletType,
                 onOptionSelected = { walletType = it },
                 label = "Wallet Type",
-                icon = Icons.Default.AccountBalanceWallet
+                itemLabel = { it.getDisplayName() },
+                itemIcon = { it.getIcon() }
             )
 
             Spacer(Modifier.height(16.dp))
@@ -225,7 +226,6 @@ fun EditCardScreen(
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.weight(1f)) {
-                    // --- INPUT FIELD: Card Number (Last 4 Digits) ---
                     PremiumTextField(
                         value = cardNumber,
                         onValueChange = { if (it.length <= 4) cardNumber = it },
@@ -255,14 +255,14 @@ fun EditCardScreen(
                     } else {
                         val balVal = balance.toDoubleOrNull() ?: 0.0
 
-                        // --- CREATING WALLET OBJECT CORRECTLY ---
                         val wallet = Wallet(
                             id = editingWallet?.id ?: "",
-                            name = walletType, // Save type as name
+                            name = editingWallet?.name ?: walletType.getDisplayName(), // Keep existing name or use type
                             bankName = bankName,
-                            cardNumber = cardNumber, // MATCHING VARIABLE NAME
+                            cardNumber = cardNumber,
                             balance = balVal,
-                            cardThemeId = selectedThemeIndex
+                            cardThemeId = selectedThemeIndex,
+                            type = walletType // Passing the explicit enum ensures the dashboard mirrors it
                         )
                         viewModel.addOrUpdateWallet(wallet) {
                             Toast.makeText(context, "Wallet Saved", Toast.LENGTH_SHORT).show()
@@ -289,7 +289,7 @@ fun EditCardScreen(
             confirmText = "Delete",
             dismissText = "Cancel",
             icon = Icons.Default.DeleteForever,
-            confirmButtonColor = MaterialTheme.colorScheme.error, // Red for destructive action
+            confirmButtonColor = MaterialTheme.colorScheme.error,
             iconColor = MaterialTheme.colorScheme.error,
             onConfirm = {
                 editingWallet?.let { wallet ->
@@ -304,25 +304,46 @@ fun EditCardScreen(
     }
 }
 
+// --- EXTENSION HELPERS FOR WALLET TYPE ---
+
+fun WalletType.getDisplayName(): String {
+    return this.name.lowercase().split("_").joinToString(" ") {
+        it.replaceFirstChar { char -> char.uppercase() }
+    }
+}
+
+fun WalletType.getIcon(): ImageVector {
+    return when (this) {
+        WalletType.SAVINGS -> Icons.Default.Savings
+        WalletType.CURRENT -> Icons.Default.AccountBalance
+        WalletType.CASH -> Icons.Default.Payments
+        WalletType.CREDIT_CARD -> Icons.Default.CreditCard
+        WalletType.SALARY -> Icons.Default.Work
+        WalletType.INVESTMENT -> Icons.AutoMirrored.Filled.TrendingUp
+    }
+}
+
 // --- COMPONENTS ---
 
 @Composable
-fun PremiumDropdown(
-    options: List<String>,
-    selectedOption: String,
-    onOptionSelected: (String) -> Unit,
+fun <T> PremiumDropdown(
+    options: List<T>,
+    selectedOption: T,
+    onOptionSelected: (T) -> Unit,
     label: String,
-    icon: ImageVector
+    itemLabel: (T) -> String,
+    itemIcon: (T) -> ImageVector
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     Box {
         OutlinedTextField(
-            value = selectedOption,
+            value = itemLabel(selectedOption),
             onValueChange = {},
             readOnly = true,
             label = { Text(label) },
-            leadingIcon = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
+            // Dynamically updates the leading icon based on the selection
+            leadingIcon = { Icon(itemIcon(selectedOption), null, tint = MaterialTheme.colorScheme.primary) },
             trailingIcon = {
                 Icon(
                     if(expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
@@ -357,12 +378,15 @@ fun PremiumDropdown(
         ) {
             options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option) },
+                    text = { Text(itemLabel(option)) },
                     onClick = {
                         onOptionSelected(option)
                         expanded = false
                     },
                     leadingIcon = {
+                        Icon(itemIcon(option), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    },
+                    trailingIcon = {
                         if (option == selectedOption) {
                             Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                         }

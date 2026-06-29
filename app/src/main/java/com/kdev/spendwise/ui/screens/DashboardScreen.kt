@@ -1,5 +1,6 @@
 package com.kdev.spendwise.ui.screens
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -31,19 +32,23 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kdev.spendwise.data.Expense
 import com.kdev.spendwise.data.RecurringRule
 import com.kdev.spendwise.data.Wallet
 import com.kdev.spendwise.data.cardThemes
 import com.kdev.spendwise.ui.MainViewModel
 import com.kdev.spendwise.ui.components.PremiumAlertDialog
-import com.kdev.spendwise.ui.components.TransactionItem
 import com.kdev.spendwise.util.CurrencyUtils
 import com.kdev.spendwise.util.DateUtils
+import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.absoluteValue
+import androidx.compose.ui.platform.LocalLocale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DashboardScreen(
     viewModel: MainViewModel,
@@ -154,7 +159,12 @@ fun DashboardScreen(
                                 HorizontalPager(
                                     state = pagerState,
                                     contentPadding = PaddingValues(horizontal = 24.dp),
-                                    pageSpacing = 16.dp
+                                    pageSpacing = 16.dp,
+                                    // Key ensures the pager tracks the specific wallet even if its order changes
+                                    key = { page ->
+                                        if (wallets.isNotEmpty() && page < wallets.size) wallets[page].id
+                                        else "add_new_wallet_page"
+                                    }
                                 ) { page ->
                                     if (wallets.isNotEmpty() && page < wallets.size) {
                                         WalletCard(
@@ -172,7 +182,7 @@ fun DashboardScreen(
                             }
                         }
 
-                        // 3. ANIMATED QUICK ACTIONS (Restored & Beats on Touch)
+                        // 3. ANIMATED QUICK ACTIONS
                         item {
                             Row(
                                 modifier = Modifier
@@ -382,7 +392,6 @@ fun HeaderSection(greeting: String, userName: String, avatarId: Int, onProfileCl
     }
 }
 
-// --- UPDATED: BEATING HEART ANIMATION ON CLICK ---
 @Composable
 fun AnimatedQuickActionItem(
     icon: ImageVector,
@@ -450,7 +459,6 @@ fun AnimatedQuickActionItem(
     }
 }
 
-// --- ANIMATED PIE CHART ---
 @Composable
 fun AnimatedPieChart(data: Map<String, Double>) {
     val total = data.values.sum()
@@ -546,7 +554,12 @@ fun WalletCard(wallet: Wallet, income: Double, expense: Double) {
                     Text(wallet.bankName.ifBlank { "Bank Name" }, color = Color.White.copy(0.9f), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Text(wallet.name, color = Color.White.copy(0.7f), fontSize = 12.sp)
                 }
-                Icon(Icons.Default.Nfc, null, tint = Color.White.copy(0.8f))
+                Icon(
+                    imageVector = wallet.icon,
+                    contentDescription = wallet.type.name,
+                    tint = Color.White.copy(0.8f),
+                    modifier = Modifier.size(32.dp)
+                )
             }
 
             Text(
@@ -674,6 +687,136 @@ fun EmptyUpcomingCard(onClick: () -> Unit) {
                 Text("No upcoming bills", fontWeight = FontWeight.Bold)
                 Text("Tap to set up Standing Instructions", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
+        }
+    }
+}
+
+// ============================================================================================
+// PREMIUM DASHBOARD TRANSACTION ITEM
+// ============================================================================================
+@SuppressLint("NonObservableLocale")
+@Composable
+fun TransactionItem(expense: Expense, viewModel: MainViewModel, wallets: List<Wallet>) {
+    val isTransfer = expense.type == "TRANSFER"
+    val isExpense = expense.amount < 0 && !isTransfer
+
+    // Color Logic: Blue for Transfer, Red for Expense, Green for Income
+    val amountColor = when {
+        isTransfer -> Color(0xFF2196F3)
+        isExpense -> Color(0xFFD32F2F)
+        else -> Color(0xFF388E3C)
+    }
+
+    // Sign Logic: Absolute value is safest for transfers viewing from multiple sides
+    val sign = when {
+        isTransfer -> ""
+        isExpense -> "-"
+        else -> "+"
+    }
+
+    // Wallet Name Resolution
+    val sourceWallet = wallets.find { it.id == expense.walletId }
+    val destWallet = wallets.find { it.id == expense.toWalletId }
+    val sourceName = sourceWallet?.let { it.bankName.ifBlank { it.name } } ?: "Wallet"
+    val destName = destWallet?.let { it.bankName.ifBlank { it.name } } ?: "Wallet"
+
+    val bankDisplay = if (isTransfer && destWallet != null) {
+        "$sourceName → $destName"
+    } else {
+        sourceName
+    }
+
+    // Category & Icon Resolution
+    val displayCategory = if (isTransfer) "Transfer" else expense.category
+    val icon = if (isTransfer) Icons.Default.SwapHoriz else viewModel.getIconForCategory(expense.category.substringAfter(" -> "))
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // --- 1. PREMIUM ICON ---
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(amountColor.copy(alpha = 0.1f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = amountColor,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+
+        Spacer(Modifier.width(16.dp))
+
+        // --- 2. HIERARCHICAL DETAILS ---
+        Column(modifier = Modifier.weight(1f)) {
+            // Row 1: Category -> Subcategory
+            Text(
+                text = displayCategory,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Row 2: Bank Name
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                Icon(
+                    imageVector = Icons.Default.AccountBalanceWallet,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = Color.Gray
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = bankDisplay,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Row 3: Notes (If available & different from category)
+            if (expense.title.isNotBlank() && expense.title != displayCategory) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Notes,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = Color.Gray
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = expense.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        // --- 3. AMOUNT & TIME ---
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = "$sign ${CurrencyUtils.formatINR(expense.amount.absoluteValue)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = amountColor
+            )
+            Text(
+                text = SimpleDateFormat("hh:mm a", LocalLocale.current.platformLocale).format(Date(expense.date)),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.LightGray
+            )
         }
     }
 }

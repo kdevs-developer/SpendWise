@@ -19,7 +19,8 @@ animationCore = "1.10.0"
 workRuntimeKtx = "2.11.0"
 firebaseCrashlyticsBuildtools = "3.0.6"
 uiGraphics = "1.10.1"
-foundationVersion = "1.10.1" # Use the version matching your Compose BOM
+foundationVersion = "1.10.1"
+ui = "1.11.3" # Use the version matching your Compose BOM
 
 [libraries]
 # Key: androidx-ui -> Accessor: libs.androidx.ui
@@ -50,6 +51,7 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 firebase-crashlytics-buildtools = { group = "com.google.firebase", name = "firebase-crashlytics-buildtools", version.ref = "firebaseCrashlyticsBuildtools" }
 androidx-compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics", version.ref = "uiGraphics" }
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "foundationVersion" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

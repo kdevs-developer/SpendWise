@@ -4,8 +4,11 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.rounded.* import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -231,13 +234,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         db.collection("users").document(uid).collection("wallets")
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null) {
-                    val list = snapshot.toObjects(Wallet::class.java)
+                    // Sort locally by orderIndex to avoid Firestore missing-field filtering on older accounts
+                    val list = snapshot.toObjects(Wallet::class.java).sortedBy { it.orderIndex }
                     wallets.clear()
                     wallets.addAll(list)
-                    // If no wallet is selected yet, default to "All" (null) or first wallet if you prefer
-                    if (wallets.isNotEmpty() && selectedWalletId == null) {
-                        // selectedWalletId = wallets.first().id // Optional: Default to first
-                    }
                 }
             }
     }
@@ -424,46 +424,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
     // ============================================================================================
-    // REGION: WALLET CRUD & CASCADE DELETE
+    // REGION: WALLET CRUD, CASCADE DELETE, & REORDERING
     // ============================================================================================
 
     fun addOrUpdateWallet(wallet: Wallet, onSuccess: () -> Unit) {
         val uid = auth.currentUser?.uid ?: return
         val walletId = if (wallet.id.isEmpty()) UUID.randomUUID().toString() else wallet.id
-        db.collection("users").document(uid).collection("wallets").document(walletId).set(wallet.copy(id = walletId)).addOnSuccessListener { onSuccess() }
+
+        // If it's a new wallet, append it to the end of the order
+        val finalWallet = if (wallet.id.isEmpty()) {
+            wallet.copy(id = walletId, orderIndex = wallets.size)
+        } else {
+            wallet.copy(id = walletId)
+        }
+
+        db.collection("users").document(uid).collection("wallets").document(walletId).set(finalWallet).addOnSuccessListener { onSuccess() }
     }
 
     fun deleteWallet(walletId: String, onSuccess: () -> Unit) {
         val uid = auth.currentUser?.uid ?: return
-        val walletRef = db.collection("users").document(uid).collection("wallets").document(walletId)
 
-        // Find all recurring rules linked to this wallet
-        db.collection("users").document(uid).collection("recurring_rules")
-            .whereEqualTo("walletId", walletId)
-            .get()
-            .addOnSuccessListener { snapshot ->
+        val walletRef = db.collection("users").document(uid).collection("wallets").document(walletId)
+        val recurringRef = db.collection("users").document(uid).collection("recurring_rules")
+        val transactionsRef = db.collection("users").document(uid).collection("transactions")
+
+        // 1. Fetch recurring rules attached to this wallet
+        val recurringTask = recurringRef.whereEqualTo("walletId", walletId).get()
+
+        // 2. Fetch transactions where this wallet is the primary source/destination
+        val txSourceTask = transactionsRef.whereEqualTo("walletId", walletId).get()
+        val txDestTask = transactionsRef.whereEqualTo("toWalletId", walletId).get()
+
+        Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(recurringTask, txSourceTask, txDestTask)
+            .addOnSuccessListener { snapshots ->
                 val batch = db.batch()
 
-                // 1. Delete the wallet
+                // Delete the wallet itself
                 batch.delete(walletRef)
 
-                // 2. Cascade Delete: Remove all linked recurring rules
-                for (doc in snapshot.documents) {
-                    batch.delete(doc.reference)
+                // Cascade delete all fetched dependent records (rules, transactions)
+                snapshots.forEach { snapshot ->
+                    for (doc in snapshot.documents) {
+                        batch.delete(doc.reference)
+                    }
                 }
 
                 batch.commit().addOnSuccessListener {
-                    if(selectedWalletId == walletId) selectedWalletId = null
+                    if (selectedWalletId == walletId) selectedWalletId = null
                     onSuccess()
                 }.addOnFailureListener { e ->
                     Log.e("WalletDelete", "Failed to cascade delete: ${e.message}")
                 }
             }
-            .addOnFailureListener { e ->
-                // If fetch fails, try deleting just the wallet
+            .addOnFailureListener {
+                // Fallback: Delete just the wallet if cascading query fails
                 walletRef.delete().addOnSuccessListener { onSuccess() }
             }
+    }
+
+    fun saveWalletOrder(orderedWallets: List<Wallet>) {
+        val uid = auth.currentUser?.uid ?: return
+
+        // Update local list state instantly to prevent UI flickering
+        wallets.clear()
+        wallets.addAll(orderedWallets)
+
+        val batch = db.batch()
+        orderedWallets.forEachIndexed { index, wallet ->
+            // Update local object so snapshots remain correct
+            wallet.orderIndex = index
+            val ref = db.collection("users").document(uid).collection("wallets").document(wallet.id)
+            // Push index change to database
+            batch.update(ref, "orderIndex", index)
+        }
+
+        batch.commit().addOnFailureListener { e ->
+            Log.e("WalletReorder", "Failed to save new wallet order", e)
+        }
     }
 
     // ============================================================================================
@@ -600,7 +639,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "Entertainment" -> Icons.Default.Movie
             "Communication" -> Icons.Default.Phone
             "Finance" -> Icons.Default.AccountBalanceWallet
-            "Investments" -> Icons.Default.TrendingUp
+            "Investments" -> Icons.AutoMirrored.Filled.TrendingUp
             "Income" -> Icons.Default.AttachMoney
             "Groceries" -> Icons.Default.ShoppingCart
             "Restaurants" -> Icons.Default.RestaurantMenu
@@ -656,7 +695,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "Rental Income" -> Icons.Default.Domain
             "Freelance" -> Icons.Default.LaptopMac
             "Side Hustle" -> Icons.Default.Bolt
-            "Refunds" -> Icons.Default.Undo
+            "Refunds" -> Icons.AutoMirrored.Filled.Undo
             "Grants" -> Icons.Default.School
             "Sale of Items" -> Icons.Default.Sell
             else -> Icons.Default.Category

@@ -1,5 +1,6 @@
 package com.kdev.spendwise.ui.screens
 
+import android.annotation.SuppressLint
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -46,13 +47,16 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.absoluteValue
+import androidx.compose.ui.platform.LocalLocale
 
+@SuppressLint("NonObservableLocale", "DefaultLocale")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTransactionScreen(
     viewModel: MainViewModel,
     onBack: () -> Unit,
-    onSaveSuccess: () -> Unit
+    onSaveSuccess: () -> Unit,
+    onAddWallet: () -> Unit = {} // Added parameter to handle empty state routing
 ) {
     val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
@@ -60,15 +64,6 @@ fun AddTransactionScreen(
     val focusManager = LocalFocusManager.current
     val haptic = LocalHapticFeedback.current
     val wallets = viewModel.wallets
-
-    // --- SAFETY CHECK ---
-    // If no wallets exist, force navigation back (Double-check)
-    LaunchedEffect(wallets) {
-        if (wallets.isEmpty()) {
-            Toast.makeText(context, "Please create a wallet first", Toast.LENGTH_SHORT).show()
-            onBack()
-        }
-    }
 
     // --- STATE ---
     val transactionTypes = listOf("Expense", "Income", "Transfer")
@@ -114,8 +109,10 @@ fun AddTransactionScreen(
 
     // Initial Edit State Load
     LaunchedEffect(Unit) {
-        delay(100)
-        focusRequester.requestFocus()
+        if (wallets.isNotEmpty()) {
+            delay(100)
+            focusRequester.requestFocus()
+        }
 
         viewModel.expenseToEdit?.let { edit ->
             selectedType = when(edit.type) {
@@ -183,7 +180,6 @@ fun AddTransactionScreen(
 
         WalletPickerDialog(
             wallets = displayedWallets,
-            // [NEW] Pass the correct ID based on which field triggered the picker
             currentWalletId = if (isSourceWalletPicker) selectedWalletId else toWalletId,
             onDismiss = { showWalletPicker = false },
             onWalletSelected = { walletId ->
@@ -197,6 +193,11 @@ fun AddTransactionScreen(
                     toWalletId = walletId
                 }
                 showWalletPicker = false
+            },
+            onAddWallet = {
+                showWalletPicker = false
+                viewModel.walletToEdit = null
+                onAddWallet()
             }
         )
     }
@@ -229,62 +230,64 @@ fun AddTransactionScreen(
             )
         },
         bottomBar = {
-            Surface(
-                shadowElevation = 8.dp,
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Button(
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        val amountVal = amount.toDoubleOrNull() ?: 0.0
+            if (wallets.isNotEmpty()) {
+                Surface(
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            val amountVal = amount.toDoubleOrNull() ?: 0.0
 
-                        // Validation Logic
-                        if (amountVal <= 0) {
-                            Toast.makeText(context, "Enter valid amount", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (selectedWalletId.isBlank()) {
-                            Toast.makeText(context, "Please create a Wallet first!", Toast.LENGTH_LONG).show()
-                            return@Button
-                        }
-                        if (selectedType == "Transfer" && (toWalletId.isBlank() || selectedWalletId == toWalletId)) {
-                            Toast.makeText(context, "Select valid destination wallet", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
+                            // Validation Logic
+                            if (amountVal <= 0) {
+                                Toast.makeText(context, "Enter valid amount", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (selectedWalletId.isBlank()) {
+                                Toast.makeText(context, "Please create a Wallet first!", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            if (selectedType == "Transfer" && (toWalletId.isBlank() || selectedWalletId == toWalletId)) {
+                                Toast.makeText(context, "Select valid destination wallet", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
 
-                        // Date Construction
-                        val calendar = Calendar.getInstance().apply {
-                            timeInMillis = selectedDateMillis
-                            set(Calendar.HOUR, if (selectedHour == 12) 0 else selectedHour)
-                            set(Calendar.MINUTE, selectedMinute)
-                            set(Calendar.AM_PM, if (isAm) Calendar.AM else Calendar.PM)
-                        }
+                            // Date Construction
+                            val calendar = Calendar.getInstance().apply {
+                                timeInMillis = selectedDateMillis
+                                set(Calendar.HOUR, if (selectedHour == 12) 0 else selectedHour)
+                                set(Calendar.MINUTE, selectedMinute)
+                                set(Calendar.AM_PM, if (isAm) Calendar.AM else Calendar.PM)
+                            }
 
-                        val finalAmt = if (selectedType == "Expense") -amountVal else amountVal
-                        val categoryString = if(selectedType == "Transfer") "Transfer" else "$selectedMainCategory -> $selectedSubCategory"
-                        val finalTitle = title.ifEmpty { if(selectedType == "Transfer") "Transfer" else "Transaction" }
+                            val finalAmt = if (selectedType == "Expense") -amountVal else amountVal
+                            val categoryString = if(selectedType == "Transfer") "Transfer" else "$selectedMainCategory -> $selectedSubCategory"
+                            val finalTitle = title.ifEmpty { if(selectedType == "Transfer") "Transfer" else "Transaction" }
 
-                        val tx = Expense(
-                            id = viewModel.expenseToEdit?.id ?: "",
-                            amount = finalAmt,
-                            title = finalTitle,
-                            category = categoryString,
-                            type = selectedType.uppercase(),
-                            date = calendar.timeInMillis,
-                            walletId = selectedWalletId,
-                            toWalletId = if(selectedType == "Transfer") toWalletId else null
-                        )
+                            val tx = Expense(
+                                id = viewModel.expenseToEdit?.id ?: "",
+                                amount = finalAmt,
+                                title = finalTitle,
+                                category = categoryString,
+                                type = selectedType.uppercase(),
+                                date = calendar.timeInMillis,
+                                walletId = selectedWalletId,
+                                toWalletId = if(selectedType == "Transfer") toWalletId else null
+                            )
 
-                        if (viewModel.expenseToEdit != null) viewModel.updateTransaction(viewModel.expenseToEdit!!, tx) else viewModel.addTransaction(tx)
-                        viewModel.clearEditState()
-                        onSaveSuccess()
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = themeColor),
-                    // [BLOCKING LOGIC] Button Disabled if Amount is empty OR Wallet is missing
-                    enabled = amount.isNotEmpty() && selectedWalletId.isNotBlank(),
-                ) { Text("SAVE TRANSACTION", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) }
+                            if (viewModel.expenseToEdit != null) viewModel.updateTransaction(viewModel.expenseToEdit!!, tx) else viewModel.addTransaction(tx)
+                            viewModel.clearEditState()
+                            onSaveSuccess()
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(16.dp).height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = themeColor),
+                        // [BLOCKING LOGIC] Button Disabled if Amount is empty OR Wallet is missing
+                        enabled = amount.isNotEmpty() && selectedWalletId.isNotBlank(),
+                    ) { Text("SAVE TRANSACTION", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp) }
+                }
             }
         }
     ) { padding ->
@@ -292,200 +295,252 @@ fun AddTransactionScreen(
             modifier = Modifier.fillMaxSize().padding(padding)
                 .pointerInput(Unit) { detectTapGestures(onTap = { focusManager.clearFocus() }) }
         ) {
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
+            // --- EMPTY WALLET STATE (Total App Empty State) ---
+            if (wallets.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(50.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        text = "No Wallets Available",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "You need to add a wallet or bank account before you can record any transactions.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(32.dp))
+                    Button(
+                        onClick = {
+                            viewModel.walletToEdit = null
+                            onAddWallet()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add New Wallet", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+            } else {
+                // --- NORMAL TRANSACTION FORM ---
+                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
 
-                // 1. TYPE SELECTOR
-                Box(Modifier.fillMaxWidth().height(50.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f)).padding(4.dp)) {
-                    Row(Modifier.fillMaxSize()) {
-                        transactionTypes.forEach { type ->
-                            val selected = selectedType == type
-                            val bgColor by animateColorAsState(if (selected) themeColor else Color.Transparent, label = "bgColor")
+                    // 1. TYPE SELECTOR
+                    Box(Modifier.fillMaxWidth().height(50.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant.copy(0.5f)).padding(4.dp)) {
+                        Row(Modifier.fillMaxSize()) {
+                            transactionTypes.forEach { type ->
+                                val selected = selectedType == type
+                                val bgColor by animateColorAsState(if (selected) themeColor else Color.Transparent, label = "bgColor")
 
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clip(CircleShape)
-                                    .background(bgColor)
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        focusManager.clearFocus()
-                                        if (selectedType != type) {
-                                            selectedType = type
-                                            // Reset categories based on type
-                                            if (type == "Income") {
-                                                selectedMainCategory = "Income"
-                                                selectedSubCategory = "Salary"
-                                            } else if (type == "Expense") {
-                                                selectedMainCategory = "Food & Drinks"
-                                                selectedSubCategory = "Groceries"
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(CircleShape)
+                                        .background(bgColor)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            focusManager.clearFocus()
+                                            if (selectedType != type) {
+                                                selectedType = type
+                                                // Reset categories based on type
+                                                if (type == "Income") {
+                                                    selectedMainCategory = "Income"
+                                                    selectedSubCategory = "Salary"
+                                                } else if (type == "Expense") {
+                                                    selectedMainCategory = "Food & Drinks"
+                                                    selectedSubCategory = "Groceries"
+                                                }
                                             }
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(type, color = if (selected) Color.White else Color.Gray, fontWeight = FontWeight.Bold)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(type, color = if (selected) Color.White else Color.Gray, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
-                }
 
-                Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(32.dp))
 
-                // 2. AMOUNT INPUT
-                Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
-                    Text("Enter Amount", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = if (selectedType == "Expense") "- ₹" else if (selectedType == "Transfer") "₹" else "+ ₹",
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = themeColor
-                        )
-                        TextField(
-                            value = amount,
-                            onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) amount = it },
-                            textStyle = TextStyle(fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = themeColor, textAlign = TextAlign.Start),
-                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Decimal,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = { focusManager.clearFocus() }
-                            ),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                cursorColor = themeColor,
-                                focusedTextColor = themeColor
-                            ),
-                            placeholder = { Text("0", fontSize = 48.sp, color = Color.LightGray) }
-                        )
+                    // 2. AMOUNT INPUT
+                    Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
+                        Text("Enter Amount", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (selectedType == "Expense") "- ₹" else if (selectedType == "Transfer") "₹" else "+ ₹",
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = themeColor
+                            )
+                            TextField(
+                                value = amount,
+                                onValueChange = { if (it.all { c -> c.isDigit() || c == '.' }) amount = it },
+                                textStyle = TextStyle(fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = themeColor, textAlign = TextAlign.Start),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Decimal,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = { focusManager.clearFocus() }
+                                ),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    cursorColor = themeColor,
+                                    focusedTextColor = themeColor
+                                ),
+                                placeholder = { Text("0", fontSize = 48.sp, color = Color.LightGray) }
+                            )
+                        }
                     }
-                }
 
-                Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(24.dp))
 
-                // 3. WALLET SELECTION
-                val walletLabel = when (selectedType) {
-                    "Expense" -> "Pay With"
-                    "Income" -> "Deposit To"
-                    else -> "Transfer From"
-                }
-
-                Text(walletLabel, style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
-
-                WalletSelectionCard(
-                    walletId = selectedWalletId,
-                    wallets = wallets,
-                    themeColor = themeColor,
-                    onClick = {
-                        isSourceWalletPicker = true
-                        showWalletPicker = true
+                    // 3. WALLET SELECTION
+                    val walletLabel = when (selectedType) {
+                        "Expense" -> "Pay With"
+                        "Income" -> "Deposit To"
+                        else -> "Transfer From"
                     }
-                )
 
-                if(selectedType == "Transfer") {
-                    Spacer(Modifier.height(16.dp))
-                    Text("Transfer To", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(walletLabel, style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+
                     WalletSelectionCard(
-                        walletId = toWalletId,
+                        walletId = selectedWalletId,
                         wallets = wallets,
                         themeColor = themeColor,
                         onClick = {
-                            isSourceWalletPicker = false
+                            isSourceWalletPicker = true
                             showWalletPicker = true
                         }
                     )
-                }
 
-                Spacer(Modifier.height(24.dp))
-
-                // 4. CATEGORY CARD (Hide for Transfer)
-                if (selectedType != "Transfer") {
-                    Text("Category Selection", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
-
-                    val displayMain = selectedMainCategory.ifEmpty { "Select Category" }
-                    val displaySub = selectedSubCategory.ifEmpty { "Tap to choose" }
-
-                    val categoryIcon = if (selectedSubCategory.isNotEmpty()) {
-                        viewModel.getIconForCategory(selectedSubCategory)
-                    } else if (selectedMainCategory.isNotEmpty()) {
-                        viewModel.getIconForCategory(selectedMainCategory)
-                    } else {
-                        Icons.Default.Category
+                    if(selectedType == "Transfer") {
+                        Spacer(Modifier.height(16.dp))
+                        Text("Transfer To", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+                        WalletSelectionCard(
+                            walletId = toWalletId,
+                            wallets = wallets,
+                            themeColor = themeColor,
+                            onClick = {
+                                isSourceWalletPicker = false
+                                showWalletPicker = true
+                            }
+                        )
                     }
 
-                    val iconTint = if(selectedSubCategory.isNotEmpty() || selectedMainCategory.isNotEmpty()) Color.White else Color.Gray
-                    val bgTint = if(selectedSubCategory.isNotEmpty() || selectedMainCategory.isNotEmpty()) themeColor else MaterialTheme.colorScheme.surfaceVariant
+                    Spacer(Modifier.height(24.dp))
 
+                    // 4. CATEGORY CARD (Hide for Transfer)
+                    if (selectedType != "Transfer") {
+                        Text("Category Selection", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
+
+                        val displayMain = selectedMainCategory.ifEmpty { "Select Category" }
+                        val displaySub = selectedSubCategory.ifEmpty { "Tap to choose" }
+
+                        val categoryIcon = if (selectedSubCategory.isNotEmpty()) {
+                            viewModel.getIconForCategory(selectedSubCategory)
+                        } else if (selectedMainCategory.isNotEmpty()) {
+                            viewModel.getIconForCategory(selectedMainCategory)
+                        } else {
+                            Icons.Default.Category
+                        }
+
+                        val iconTint = if(selectedSubCategory.isNotEmpty() || selectedMainCategory.isNotEmpty()) Color.White else Color.Gray
+                        val bgTint = if(selectedSubCategory.isNotEmpty() || selectedMainCategory.isNotEmpty()) themeColor else MaterialTheme.colorScheme.surfaceVariant
+
+                        Card(
+                            onClick = { focusManager.clearFocus(); isCategoryPickerVisible = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = themeColor.copy(alpha = 0.08f)),
+                            border = BorderStroke(1.dp, themeColor.copy(alpha = 0.2f))
+                        ) {
+                            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(48.dp).background(bgTint, CircleShape), Alignment.Center) {
+                                    Icon(categoryIcon, null, tint = iconTint)
+                                }
+                                Spacer(Modifier.width(16.dp))
+                                Column {
+                                    Text(displayMain, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = themeColor)
+                                    Text(displaySub, fontSize = 14.sp, color = Color.Gray)
+                                }
+                                Spacer(Modifier.weight(1f))
+                                Icon(Icons.Default.ChevronRight, null, tint = themeColor)
+                            }
+                        }
+                        Spacer(Modifier.height(24.dp))
+                    }
+
+                    // 5. DATE & TIME
+                    Text("Date & Time", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
                     Card(
-                        onClick = { focusManager.clearFocus(); isCategoryPickerVisible = true },
+                        onClick = { focusManager.clearFocus(); showDateTimePicker = true },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = themeColor.copy(alpha = 0.08f)),
-                        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.2f))
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.3f))
                     ) {
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(48.dp).background(bgTint, CircleShape), Alignment.Center) {
-                                Icon(categoryIcon, null, tint = iconTint)
-                            }
-                            Spacer(Modifier.width(16.dp))
-                            Column {
-                                Text(displayMain, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = themeColor)
-                                Text(displaySub, fontSize = 14.sp, color = Color.Gray)
-                            }
+                            Icon(Icons.Default.CalendarMonth, null, tint = Color.Gray)
+                            Spacer(Modifier.width(12.dp))
+
+                            val dateStr = SimpleDateFormat("dd MMM, yyyy", LocalLocale.current.platformLocale).format(Date(selectedDateMillis))
+                            val timeStr = String.format("%02d:%02d %s", selectedHour, selectedMinute, if (isAm) "AM" else "PM")
+
+                            Text("$dateStr • $timeStr", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             Spacer(Modifier.weight(1f))
-                            Icon(Icons.Default.ChevronRight, null, tint = themeColor)
+                            Icon(Icons.Default.Edit, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
                         }
                     }
+
                     Spacer(Modifier.height(24.dp))
+
+                    // 6. NOTE INPUT
+                    OutlinedTextField(
+                        value = title, onValueChange = { title = it },
+                        label = { Text("Note (Optional)") },
+                        modifier = Modifier.fillMaxWidth().focusRequester(noteFocusRequester),
+                        shape = RoundedCornerShape(16.dp),
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { focusManager.clearFocus() }
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(Modifier.height(100.dp))
                 }
-
-                // 5. DATE & TIME
-                Text("Date & Time", style = MaterialTheme.typography.labelLarge, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp))
-                Card(
-                    onClick = { focusManager.clearFocus(); showDateTimePicker = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(0.3f))
-                ) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CalendarMonth, null, tint = Color.Gray)
-                        Spacer(Modifier.width(12.dp))
-
-                        val dateStr = SimpleDateFormat("dd MMM, yyyy", Locale.getDefault()).format(Date(selectedDateMillis))
-                        val timeStr = String.format("%02d:%02d %s", selectedHour, selectedMinute, if (isAm) "AM" else "PM")
-
-                        Text("$dateStr • $timeStr", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Spacer(Modifier.weight(1f))
-                        Icon(Icons.Default.Edit, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
-                    }
-                }
-
-                Spacer(Modifier.height(24.dp))
-
-                // 6. NOTE INPUT
-                OutlinedTextField(
-                    value = title, onValueChange = { title = it },
-                    label = { Text("Note (Optional)") },
-                    modifier = Modifier.fillMaxWidth().focusRequester(noteFocusRequester),
-                    shape = RoundedCornerShape(16.dp),
-                    leadingIcon = { Icon(Icons.Default.Edit, null) },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    ),
-                    singleLine = true
-                )
-
-                Spacer(Modifier.height(100.dp))
             }
         }
     }
@@ -538,7 +593,8 @@ fun WalletPickerDialog(
     wallets: List<Wallet>,
     currentWalletId: String?,
     onDismiss: () -> Unit,
-    onWalletSelected: (String) -> Unit
+    onWalletSelected: (String) -> Unit,
+    onAddWallet: () -> Unit // Added callback for empty state action
 ) {
     // 1. Theme Color
     val selectionColor = BlueGreyMain
@@ -597,139 +653,181 @@ fun WalletPickerDialog(
                     }
                 }
 
-                // --- LIST ---
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    modifier = Modifier.verticalScroll(rememberScrollState())
-                ) {
-                    wallets.forEach { wallet ->
-                        val isSelected = wallet.id == selectedId
-
-                        // Theme Logic
-                        val theme = cardThemes.getOrElse(wallet.cardThemeId) { cardThemes[0] }
-                        val brush = Brush.linearGradient(colors = listOf(theme.start, theme.end))
-
-                        val displayNum = if (wallet.cardNumber.isNotBlank()) {
-                            wallet.cardNumber.takeLast(4)
-                        } else {
-                            val hash = wallet.id.hashCode().absoluteValue.toString()
-                            hash.takeLast(4).padStart(4, '0')
-                        }
-
-                        Card(
-                            onClick = {
-                                selectedId = wallet.id
-                                onWalletSelected(wallet.id)
-                            },
+                // --- LIST OR EMPTY STATE ---
+                if (wallets.isEmpty()) {
+                    // Premium Empty State if no wallets available (e.g., Transfer with only 1 wallet)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(130.dp),
-                            // NO ALPHA: Cards remain fully visible as requested
-                            shape = RoundedCornerShape(24.dp),
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = if (isSelected) 12.dp else 2.dp
-                            ),
-                            border = if (isSelected) BorderStroke(2.dp, selectionColor) else null
+                                .size(80.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(brush)
-                            ) {
-                                // Texture Overlay
-                                Box(
-                                    Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.1f))
-                                )
+                            Icon(
+                                Icons.Default.AccountBalanceWallet,
+                                null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Text("No Accounts Found", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "You need to add another wallet before you can perform this action.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                        Spacer(Modifier.height(32.dp))
+                        Button(
+                            onClick = onAddWallet,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.height(48.dp).padding(horizontal = 24.dp)
+                        ) {
+                            Text("Add New Wallet", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        wallets.forEach { wallet ->
+                            val isSelected = wallet.id == selectedId
 
-                                Row(
+                            // Theme Logic
+                            val theme = cardThemes.getOrElse(wallet.cardThemeId) { cardThemes[0] }
+                            val brush = Brush.linearGradient(colors = listOf(theme.start, theme.end))
+
+                            val displayNum = if (wallet.cardNumber.isNotBlank()) {
+                                wallet.cardNumber.takeLast(4)
+                            } else {
+                                val hash = wallet.id.hashCode().absoluteValue.toString()
+                                hash.takeLast(4).padStart(4, '0')
+                            }
+
+                            Card(
+                                onClick = {
+                                    selectedId = wallet.id
+                                    onWalletSelected(wallet.id)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(130.dp),
+                                // NO ALPHA: Cards remain fully visible as requested
+                                shape = RoundedCornerShape(24.dp),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (isSelected) 12.dp else 2.dp
+                                ),
+                                border = if (isSelected) BorderStroke(2.dp, selectionColor) else null
+                            ) {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .background(brush)
                                 ) {
-                                    // Left: Info
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.Center
+                                    // Texture Overlay
+                                    Box(
+                                        Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black.copy(alpha = 0.1f))
+                                    )
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        // Wallet Nickname (Small Top)
-                                        Text(
-                                            text = wallet.name.uppercase(),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Medium,
-                                            letterSpacing = 1.sp,
-                                            color = Color.White.copy(alpha = 0.7f)
-                                        )
+                                        // Left: Info
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            // Wallet Nickname (Small Top)
+                                            Text(
+                                                text = wallet.name.uppercase(),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Medium,
+                                                letterSpacing = 1.sp,
+                                                color = Color.White.copy(alpha = 0.7f)
+                                            )
 
-                                        Spacer(modifier = Modifier.height(6.dp))
+                                            Spacer(modifier = Modifier.height(6.dp))
 
-                                        // Bank Name (Big Middle)
-                                        Text(
-                                            text = wallet.bankName.ifBlank { "Bank Name" },
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White,
-                                            maxLines = 1,
-                                            modifier = Modifier.wrapContentWidth(Alignment.Start)
-                                        )
+                                            // Bank Name (Big Middle)
+                                            Text(
+                                                text = wallet.bankName.ifBlank { "Bank Name" },
+                                                style = MaterialTheme.typography.headlineMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                modifier = Modifier.wrapContentWidth(Alignment.Start)
+                                            )
 
-                                        Spacer(modifier = Modifier.height(8.dp))
+                                            Spacer(modifier = Modifier.height(8.dp))
 
-                                        // Number (Bottom)
-                                        Text(
-                                            text = "••••  ••••  ••••  $displayNum",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            color = Color.White.copy(alpha = 0.8f)
-                                        )
-                                    }
-
-                                    // Right: Selection & Balance
-                                    Column(
-                                        horizontalAlignment = Alignment.End,
-                                        verticalArrangement = Arrangement.SpaceBetween,
-                                        modifier = Modifier.fillMaxHeight()
-                                    ) {
-                                        if (isSelected) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(28.dp)
-                                                    .background(selectionColor, CircleShape),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = "Selected",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(24.dp)
-                                                    .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                            // Number (Bottom)
+                                            Text(
+                                                text = "••••  ••••  ••••  $displayNum",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                color = Color.White.copy(alpha = 0.8f)
                                             )
                                         }
 
-                                        Spacer(modifier = Modifier.weight(1f))
+                                        // Right: Selection & Balance
+                                        Column(
+                                            horizontalAlignment = Alignment.End,
+                                            verticalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxHeight()
+                                        ) {
+                                            if (isSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .background(selectionColor, CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(24.dp)
+                                                        .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                                )
+                                            }
 
-                                        // Added Balance to match premium layout
-                                        Text(
-                                            text = CurrencyUtils.formatINR(wallet.balance),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
+                                            Spacer(modifier = Modifier.weight(1f))
+
+                                            // Added Balance to match premium layout
+                                            Text(
+                                                text = CurrencyUtils.formatINR(wallet.balance),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
+                        Spacer(Modifier.height(48.dp))
                     }
-                    Spacer(Modifier.height(48.dp))
                 }
             }
         }
